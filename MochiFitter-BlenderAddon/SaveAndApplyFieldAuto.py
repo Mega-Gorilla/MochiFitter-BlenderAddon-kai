@@ -131,18 +131,6 @@ def find_nearest_parent_with_pose(bone_name: str,
         current_bone = parent_bone
     return None
 
-def matrix_to_list(matrix):
-    """
-    Matrix型をリストに変換する（JSON保存用）
-    
-    Parameters:
-        matrix: mathutils.Matrix - 変換する行列
-        
-    Returns:
-        list: 行列の各要素をリストとして表現
-    """
-    return [list(row) for row in matrix]
-
 def save_armature_pose(armature_obj, filename="pose_data.json", avatar_data_file="avatar_data.json"):
     """
     アクティブなArmatureのHumanoidボーンのポーズをワールド座標系でJSONファイルに保存する
@@ -374,11 +362,15 @@ def apply_finger_bone_adjustments(
 
 def list_to_matrix(matrix_list):
     """
-    リストからMatrix型に変換する（JSON読み込み用）
-    
+    リストからMatrix型に変換する（古いJSONフォーマットのフォールバック用）
+
+    Note:
+        この関数は delta_matrix フィールドを含む古いposediff JSONとの
+        後方互換性のために残されています。新しいJSONでは使用されません。
+
     Parameters:
         matrix_list: list - 行列のデータを含む2次元リスト
-        
+
     Returns:
         Matrix: 変換された行列
     """
@@ -511,16 +503,27 @@ def add_pose_from_json(filename="pose_data.json", avatar_data_file="avatar_data.
         # 現在のワールド空間での行列を取得（オリジナルデータを使用）
         current_world_matrix = active_obj.matrix_world @ original_data['matrix']
 
-        # 個別フィールド（location, rotation, scale）から変換行列を構築
-        delta_loc = Vector(pose_data[source_humanoid_bone]['location'])
-        delta_rot = Euler([math.radians(x) for x in pose_data[source_humanoid_bone]['rotation']], 'XYZ')
-        delta_scale = Vector(pose_data[source_humanoid_bone]['scale'])
+        # 変換行列を構築
+        bone_pose = pose_data[source_humanoid_bone]
 
-        delta_matrix = Matrix.Translation(delta_loc) @ \
-                    delta_rot.to_matrix().to_4x4() @ \
-                    Matrix.Scale(delta_scale.x, 4, (1, 0, 0)) @ \
-                    Matrix.Scale(delta_scale.y, 4, (0, 1, 0)) @ \
-                    Matrix.Scale(delta_scale.z, 4, (0, 0, 1))
+        # 個別フィールド（location, rotation, scale）を優先的に使用
+        # 古いJSONとの互換性のため、存在しない場合はdelta_matrixにフォールバック
+        if 'location' in bone_pose and 'rotation' in bone_pose and 'scale' in bone_pose:
+            delta_loc = Vector(bone_pose['location'])
+            delta_rot = Euler([math.radians(x) for x in bone_pose['rotation']], 'XYZ')
+            delta_scale = Vector(bone_pose['scale'])
+
+            delta_matrix = Matrix.Translation(delta_loc) @ \
+                        delta_rot.to_matrix().to_4x4() @ \
+                        Matrix.Scale(delta_scale.x, 4, (1, 0, 0)) @ \
+                        Matrix.Scale(delta_scale.y, 4, (0, 1, 0)) @ \
+                        Matrix.Scale(delta_scale.z, 4, (0, 0, 1))
+        elif 'delta_matrix' in bone_pose:
+            # フォールバック: 古いJSONフォーマット（delta_matrixのみ）をサポート
+            delta_matrix = list_to_matrix(bone_pose['delta_matrix'])
+        else:
+            print(f"Warning: No valid pose data for {source_humanoid_bone}, skipping")
+            continue
         
         if invert:
             delta_matrix = delta_matrix.inverted()

@@ -23,7 +23,12 @@
       "Bash(gh issue comment:*)",
       "Bash(git pull:*)",
       "Bash(dir \"%APPDATA%\\Blender Foundation\\Blender\")",
-      "Bash(powershell -Command \"Get-ChildItem ''$env:APPDATA\\Blender Foundation\\Blender'' -Directory | Select-Object Name\")"
+      "Bash(powershell -Command \"Get-ChildItem ''$env:APPDATA\\Blender Foundation\\Blender'' -Directory | Select-Object Name\")",
+      "Bash(gh release create v0.1.0 --title \"v0.1.0 - Initial Community Fork\" --notes \"$(cat <<''EOF''\n## MochiFitter-Kai v0.1.0\n\n[MochiFitter](https://booth.pm/ja/items/7657840) のコミュニティフォーク初回リリース\n\n### 主な変更点\n\n#### delta_matrix 廃止\n- posediff JSON から `delta_matrix` フィールドを削除\n- ユーザーが `location`, `rotation`, `scale` を直接編集可能に\n- Unity 側は `hasDeltaMatrix` フォールバックで互換性維持\n\n#### アドオン情報の更新\n- アドオン名を「MochiFitter-Kai」に変更\n- 非公式版であることを明記\n- GitHub リポジトリへのリンクを追加\n\n### インストール方法\n\n1. [MochiFitter-BlenderAddon](https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/tree/master/MochiFitter-BlenderAddon) フォルダをダウンロード\n2. Blender の `Edit` → `Preferences` → `Add-ons` → `Install...`\n3. ダウンロードしたフォルダを選択してインストール\n\n### 動作要件\n\n- Blender 4.0 以上\n- SciPy（アドオン内の再インストールボタンで導入可能）\n\n---\n\n⚠️ **注意**: これは非公式のコミュニティフォークです。本家 MochiFitter のサポートは [BOOTH](https://booth.pm/ja/items/7657840) をご確認ください。\nEOF\n)\")",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(powershell:*)",
+      "Bash(gh issue reopen:*)"
     ]
   }
 }
