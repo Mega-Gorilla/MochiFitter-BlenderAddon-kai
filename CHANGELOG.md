@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - これらが存在しない古いJSONでは `delta_matrix` にフォールバック
   - KeyError による読み込み失敗を防止
 
+### Fixed
+- `BrokenProcessPool` エラーを修正 - Windows での安定性向上
+  - `max_workers` を最大8に制限 (`min(8, os.cpu_count())`)
+  - 32プロセス同時起動によるメモリ不足を回避
+
 ### Removed
 - 未使用の `matrix_to_list()` 関数を削除
 
