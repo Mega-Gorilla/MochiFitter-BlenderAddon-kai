@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Select-String -Pattern \"delta_matrix|scale|location|rotation|posediff|pose\" -AllMatches)",
+      "Bash(ForEach-Object { $_Matches.Value })",
+      "Bash(Sort-Object -Unique)",
+      "Bash(powershell -Command \"& { $bytes = [System.IO.File]::ReadAllBytes(''D:\\Codes\\MochiFitter-BlenderAddon-kai\\MochFitter-unity-addon\\OutfitRetargetingSystem\\Editor\\OutfitRetargetingSystem.dll''); $text = [System.Text.Encoding]::UTF8.GetString($bytes); $matches = [regex]::Matches($text, ''[a-zA-Z_][a-zA-Z0-9_]{3,30}''); $matches | ForEach-Object { $_Value } | Sort-Object -Unique | Where-Object { $_-match ''delta|matrix|scale|location|rotation|pose|bone|Hips|transform'' } }\")",
+      "Bash(uv venv:*)",
+      "Bash(.venv\\Scripts\\python.exe:*)",
+      "Bash(D:\\Codes\\MochiFitter-BlenderAddon-kai\\.venv\\Scripts\\python.exe:*)",
+      "Bash(uv run python:*)",
+      "Bash(uv pip install:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
