@@ -5,7 +5,10 @@
 # -------------------------------------------
 # 有料コンテンツ（公開禁止）
 # -------------------------------------------
-MochFitter-unity-addon/
+# Unity側DLLとデータファイル（有料アドオン）
+MochFitter-unity-addon/OutfitRetargetingSystem/
+
+# BlenderTools/ は GPL v3 ライセンスのため公開OK
 
 # -------------------------------------------
 # Python
