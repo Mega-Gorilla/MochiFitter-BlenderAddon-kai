@@ -146,8 +146,7 @@ def matrix_to_list(matrix):
 def save_armature_pose(armature_obj, filename="pose_data.json", avatar_data_file="avatar_data.json"):
     """
     アクティブなArmatureのHumanoidボーンのポーズをワールド座標系でJSONファイルに保存する
-    delta_matrixも保存する
-    
+
     Parameters:
         filename (str): 保存するJSONファイルの名前
         avatar_data_file (str): アバターデータのJSONファイル名
@@ -198,20 +197,16 @@ def save_armature_pose(armature_obj, filename="pose_data.json", avatar_data_file
         
         # スケールを取得
         scale = delta_matrix.to_scale()
-        
-        # delta_matrixを2次元リストに変換
-        delta_matrix_list = matrix_to_list(delta_matrix)
-        
+
         # データを辞書に格納（Humanoidボーン名をキーとして使用）
         pose_data[humanoid_name] = {
             'location': [location.x, location.y, location.z],
-            'rotation': [math.degrees(rotation.x), 
-                        math.degrees(rotation.y), 
+            'rotation': [math.degrees(rotation.x),
+                        math.degrees(rotation.y),
                         math.degrees(rotation.z)],
             'scale': [scale.x, scale.y, scale.z],
             'head_world': [head_world.x, head_world.y, head_world.z],
-            'head_world_transformed': [head_world_transformed.x, head_world_transformed.y, head_world_transformed.z],
-            'delta_matrix': delta_matrix_list  # delta_matrixをJSONに追加
+            'head_world_transformed': [head_world_transformed.x, head_world_transformed.y, head_world_transformed.z]
         }
     
     # JSONファイルに保存
@@ -515,21 +510,17 @@ def add_pose_from_json(filename="pose_data.json", avatar_data_file="avatar_data.
         
         # 現在のワールド空間での行列を取得（オリジナルデータを使用）
         current_world_matrix = active_obj.matrix_world @ original_data['matrix']
-        
-        # delta_matrixがJSONに保存されている場合はそれを使用
-        if 'delta_matrix' in pose_data[source_humanoid_bone]:
-            delta_matrix = list_to_matrix(pose_data[source_humanoid_bone]['delta_matrix'])
-        else:
-            # 後方互換性のため、ない場合は従来の方法で計算
-            delta_loc = Vector(pose_data[source_humanoid_bone]['location'])
-            delta_rot = Euler([math.radians(x) for x in pose_data[source_humanoid_bone]['rotation']], 'XYZ')
-            delta_scale = Vector(pose_data[source_humanoid_bone]['scale'])
-            
-            delta_matrix = Matrix.Translation(delta_loc) @ \
-                        delta_rot.to_matrix().to_4x4() @ \
-                        Matrix.Scale(delta_scale.x, 4, (1, 0, 0)) @ \
-                        Matrix.Scale(delta_scale.y, 4, (0, 1, 0)) @ \
-                        Matrix.Scale(delta_scale.z, 4, (0, 0, 1))
+
+        # 個別フィールド（location, rotation, scale）から変換行列を構築
+        delta_loc = Vector(pose_data[source_humanoid_bone]['location'])
+        delta_rot = Euler([math.radians(x) for x in pose_data[source_humanoid_bone]['rotation']], 'XYZ')
+        delta_scale = Vector(pose_data[source_humanoid_bone]['scale'])
+
+        delta_matrix = Matrix.Translation(delta_loc) @ \
+                    delta_rot.to_matrix().to_4x4() @ \
+                    Matrix.Scale(delta_scale.x, 4, (1, 0, 0)) @ \
+                    Matrix.Scale(delta_scale.y, 4, (0, 1, 0)) @ \
+                    Matrix.Scale(delta_scale.z, 4, (0, 0, 1))
         
         if invert:
             delta_matrix = delta_matrix.inverted()
