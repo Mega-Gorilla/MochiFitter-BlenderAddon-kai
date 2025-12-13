@@ -4,14 +4,14 @@ MochiFitter - Advanced Avatar Outfit Retargeting System for Blender
 """
 
 bl_info = {
-    "name": "MochiFitter",
-    "author": "MochiFitter Development Team",
-    "version": (2, 5, 0),
+    "name": "MochiFitter-Kai",
+    "author": "Community Fork (Original: MochiFitter Development Team)",
+    "version": (0, 1, 0),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > MochiFitter",
-    "description": "Advanced Avatar Outfit Retargeting System using RBF interpolation and deformation fields",
-    "warning": "",
-    "wiki_url": "",
+    "description": "Community-optimized fork of MochiFitter - Avatar Outfit Retargeting System using RBF interpolation",
+    "warning": "非公式版 - This is an unofficial community fork",
+    "wiki_url": "https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai",
     "category": "Mesh",
     "support": "COMMUNITY"
 }

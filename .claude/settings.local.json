@@ -11,7 +11,19 @@
       "Bash(uv run python:*)",
       "Bash(uv pip install:*)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(gh auth:*)",
+      "Bash(gh repo create:*)",
+      "Bash(gh issue create:*)",
+      "Bash(git checkout:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(git pull:*)",
+      "Bash(dir \"%APPDATA%\\Blender Foundation\\Blender\")",
+      "Bash(powershell -Command \"Get-ChildItem ''$env:APPDATA\\Blender Foundation\\Blender'' -Directory | Select-Object Name\")"
     ]
   }
 }
