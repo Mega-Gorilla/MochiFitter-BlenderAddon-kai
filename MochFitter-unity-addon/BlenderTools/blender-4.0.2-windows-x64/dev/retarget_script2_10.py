@@ -16176,8 +16176,9 @@ def run_smoothing_processor(temp_file_path: str, multi_group: bool = False,
         env['PYTHONPATH'] = os.pathsep.join(pythonpath_parts)
         
         # マルチスレッド用環境変数
+        # Windows でのBrokenProcessPool回避のため、最大8ワーカーに制限
         if max_workers is None:
-            max_workers = os.cpu_count()
+            max_workers = min(8, os.cpu_count() or 8)
         env['OMP_NUM_THREADS'] = str(max_workers)
         env['OPENBLAS_NUM_THREADS'] = str(max_workers)
         env['MKL_NUM_THREADS'] = str(max_workers)
@@ -17054,10 +17055,11 @@ def apply_distance_normal_based_smoothing(body_obj, cloth_obj, distance_min=0.0,
         )
         
         # 外部スクリプトで一括処理を実行
+        # Windows でのBrokenProcessPool回避のため、最大8ワーカーに制限
         success, output, error = run_smoothing_processor(
             temp_file_path=temp_file,
             multi_group=True,
-            max_workers=os.cpu_count()
+            max_workers=min(8, os.cpu_count() or 8)
         )
     else:
         print(f"  頂点数が3000未満({len(vertex_coords)}頂点)のため、フォールバック処理を使用します...")
