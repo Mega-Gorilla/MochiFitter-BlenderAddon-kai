@@ -4041,6 +4041,75 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
         return {'RUNNING_MODAL'}
 
 
+def safe_decode(data):
+    """
+    バイナリデータを安全にテキストにデコードする。
+    Windows のコンソール出力で発生する UnicodeDecodeError を回避するため、
+    UTF-8 → CP932 → 置換モード UTF-8 の順でフォールバックする。
+
+    Parameters:
+        data (bytes): デコードするバイナリデータ
+
+    Returns:
+        str: デコードされたテキスト
+    """
+    if not data:
+        return ""
+    # まず UTF-8 を試す
+    try:
+        return data.decode('utf-8')
+    except UnicodeDecodeError:
+        pass
+    # 次に CP932 (Shift-JIS) を試す
+    try:
+        return data.decode('cp932')
+    except UnicodeDecodeError:
+        pass
+    # 最後に置換モードで UTF-8
+    return data.decode('utf-8', errors='replace')
+
+
+def run_subprocess_safe(cmd, env=None, timeout=None, cwd=None):
+    """
+    UnicodeDecodeError を回避して subprocess を実行する。
+    Windows 環境でテキストモードを使わず、バイナリモードで実行して
+    手動でデコードする。
+
+    Parameters:
+        cmd (list): 実行するコマンド
+        env (dict, optional): 環境変数
+        timeout (int, optional): タイムアウト秒数
+        cwd (str, optional): 作業ディレクトリ
+
+    Returns:
+        tuple: (returncode, stdout_text, stderr_text)
+    """
+    creationflags = 0
+    if platform.system() == "Windows":
+        creationflags = subprocess.CREATE_NO_WINDOW
+
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        cwd=cwd,
+        creationflags=creationflags
+    )
+
+    try:
+        stdout_bytes, stderr_bytes = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout_bytes, stderr_bytes = process.communicate()
+        return -1, "", "Timeout"
+
+    stdout_text = safe_decode(stdout_bytes)
+    stderr_text = safe_decode(stderr_bytes)
+
+    return process.returncode, stdout_text, stderr_text
+
+
 def get_blender_python_path():
     """
     Blenderに含まれるPythonバイナリのパスを取得する
@@ -4130,38 +4199,26 @@ def get_blender_python_user_site_packages(python_path=None):
             
         # Pythonでユーザーサイトパッケージディレクトリを取得
         cmd = [python_path, '-c', 'import site; print(site.getusersitepackages())']
-        
+
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=10,
-                creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
-            )
-            
-            if result.returncode == 0:
-                user_site_path = result.stdout.strip()
+            returncode, stdout, stderr = run_subprocess_safe(cmd, timeout=10)
+
+            if returncode == 0:
+                user_site_path = stdout.strip()
                 if user_site_path and os.path.exists(user_site_path):
                     return user_site_path
         except:
             pass
-        
+
         # フォールバック: 手動でパスを構築
         if platform.system() == "Windows":
             # Pythonのバージョンを取得
             try:
                 version_cmd = [python_path, '-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")']
-                version_result = subprocess.run(
-                    version_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                
-                if version_result.returncode == 0:
-                    python_version = version_result.stdout.strip()
+                returncode, stdout, stderr = run_subprocess_safe(version_cmd, timeout=5)
+
+                if returncode == 0:
+                    python_version = stdout.strip()
                     # Windows: %APPDATA%\Python\PythonXX\site-packages
                     appdata = os.environ.get('APPDATA', '')
                     if appdata:
@@ -4866,10 +4923,11 @@ def reinstall_numpy_scipy_multithreaded():
             """
             # 方法1: cmd /c mkdir（Store版Blender対応）
             try:
+                # 出力は不要なので DEVNULL を使用（UnicodeDecodeError 回避）
                 result = subprocess.run(
                     ['cmd', '/c', 'mkdir', path],
-                    capture_output=True,
-                    text=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                     shell=False
                 )
                 if result.returncode == 0:
@@ -4929,23 +4987,7 @@ def reinstall_numpy_scipy_multithreaded():
         )
         stdout_bytes, stderr_bytes = process.communicate()
 
-        # バイナリを安全にデコード（Shift-JIS/UTF-8 両対応）
-        def safe_decode(data):
-            if not data:
-                return ""
-            # まず UTF-8 を試す
-            try:
-                return data.decode('utf-8')
-            except UnicodeDecodeError:
-                pass
-            # 次に CP932 (Shift-JIS) を試す
-            try:
-                return data.decode('cp932')
-            except UnicodeDecodeError:
-                pass
-            # 最後に置換モードで UTF-8
-            return data.decode('utf-8', errors='replace')
-
+        # モジュールレベルの safe_decode() を使用してデコード
         stdout_text = safe_decode(stdout_bytes)
         stderr_text = safe_decode(stderr_bytes)
 
@@ -5277,22 +5319,14 @@ print("\\nTest completed")
             print(f"外部Pythonテスト実行")
             print(f"{'='*60}")
             print(f"実行コマンド: {' '.join(cmd)}")
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',  # 文字エンコーディングエラーを無視
-                cwd=scene_folder,
-                env=env
-            )
-            
-            print(f"実行結果 (return code: {result.returncode}):")
-            print(f"出力:\n{result.stdout}")
-            
-            if result.stderr:
-                print(f"エラー出力:\n{result.stderr}")
+
+            returncode, stdout, stderr = run_subprocess_safe(cmd, env=env, cwd=scene_folder)
+
+            print(f"実行結果 (return code: {returncode}):")
+            print(f"出力:\n{stdout}")
+
+            if stderr:
+                print(f"エラー出力:\n{stderr}")
             
             # テストスクリプトを削除
             try:
@@ -5300,7 +5334,7 @@ print("\\nTest completed")
             except:
                 pass
             
-            if result.returncode == 0:
+            if returncode == 0:
                 self.report({'INFO'}, "外部Pythonテストが成功しました")
             else:
                 self.report({'WARNING'}, "外部Pythonテストで問題が検出されました")
