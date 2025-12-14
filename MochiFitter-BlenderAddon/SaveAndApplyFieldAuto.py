@@ -4919,14 +4919,42 @@ def reinstall_numpy_scipy_multithreaded():
         env['PYTHONLEGACYWINDOWSSTDIO'] = '1'
         env['PIP_NO_CACHE_DIR'] = '1'
 
-        result = subprocess.run(
+        # subprocess.run() の capture_output=True は Windows で UnicodeDecodeError を
+        # 起こすことがあるため、バイナリモードで実行して手動でデコード
+        process = subprocess.Popen(
             cmd,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=env
         )
+        stdout_bytes, stderr_bytes = process.communicate()
+
+        # バイナリを安全にデコード（Shift-JIS/UTF-8 両対応）
+        def safe_decode(data):
+            if not data:
+                return ""
+            # まず UTF-8 を試す
+            try:
+                return data.decode('utf-8')
+            except UnicodeDecodeError:
+                pass
+            # 次に CP932 (Shift-JIS) を試す
+            try:
+                return data.decode('cp932')
+            except UnicodeDecodeError:
+                pass
+            # 最後に置換モードで UTF-8
+            return data.decode('utf-8', errors='replace')
+
+        stdout_text = safe_decode(stdout_bytes)
+        stderr_text = safe_decode(stderr_bytes)
+
+        class Result:
+            returncode = process.returncode
+            stdout = stdout_text
+            stderr = stderr_text
+
+        result = Result()
 
         print(f"実行結果 (return code: {result.returncode}):")
         print(f"出力:\n{result.stdout}")
@@ -5066,11 +5094,31 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
 
                     self.report({'WARNING'}, f"{packages_info} を再インストールしました。Blenderを再起動してください")
                     print(f"NumPy・SciPy再インストール成功。Blenderを再起動してください。")
+
+                    # 成功ポップアップを表示
+                    def draw_success_popup(self, context):
+                        self.layout.label(text="NumPy・SciPy のインストールが完了しました")
+                        self.layout.label(text="")
+                        self.layout.label(text="Blender を再起動してください", icon='ERROR')
+
+                    context.window_manager.popup_menu(draw_success_popup, title="インストール完了", icon='CHECKMARK')
                 else:
                     if error:
                         self.report({'ERROR'}, error)
                     else:
                         self.report({'ERROR'}, "NumPy・SciPy再インストールに失敗しました")
+
+                    # エラーポップアップを表示
+                    def draw_error_popup(self, context):
+                        self.layout.label(text="インストールに失敗しました")
+                        self.layout.label(text="")
+                        if error:
+                            # エラーメッセージを短く表示
+                            short_error = error[:80] + "..." if len(error) > 80 else error
+                            self.layout.label(text=short_error)
+                        self.layout.label(text="詳細はコンソールを確認してください", icon='INFO')
+
+                    context.window_manager.popup_menu(draw_error_popup, title="インストールエラー", icon='ERROR')
 
                 # UIを更新
                 for area in context.screen.areas:
