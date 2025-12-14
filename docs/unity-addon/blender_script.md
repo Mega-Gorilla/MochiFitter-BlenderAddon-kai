@@ -8,16 +8,42 @@
 `retarget_script` は Unity アドオンから呼び出される Blender Python スクリプトで、
 衣装メッシュのリターゲット処理を実行します。
 
+> **Note**: スクリプト名はバージョンにより異なります（例: `retarget_script2_12.py`）。
+> Unity アドオンが適切なバージョンを自動で展開・使用します。
+
 ## 呼び出し方法
 
 Unity から以下のように呼び出されます：
 
 ```bash
-blender --background --python retarget_script.py -- \
-    --base scene.blend \
-    --config config_source_to_target.json \
+blender --background --python retarget_script2_XX.py -- \
+    --input clothing.fbx \
     --output output.fbx \
+    --base scene.blend \
+    --base-fbx "avatar1.fbx;avatar2.fbx" \
+    --config "config1.json;config2.json" \
+    --init-pose init_pose.json \
     [オプション...]
+```
+
+### 必須引数
+
+| 引数 | 説明 |
+|------|------|
+| `--input` | 入力衣装 FBX ファイル |
+| `--output` | 出力 FBX ファイル |
+| `--base` | ベース Blender ファイル (.blend) |
+| `--base-fbx` | ベースアバター FBX（セミコロン区切りで複数指定可） |
+| `--config` | config JSON（セミコロン区切りで複数指定可） |
+| `--init-pose` | 初期ポーズ JSON ファイル |
+
+### 複数ペア処理（チェーン処理）
+
+`--base-fbx` と `--config` はセミコロン区切りで複数指定できます。
+複数指定時は、前段の処理結果が次段の入力として使用されるチェーン処理になります：
+
+```
+[入力 FBX] → [config1 処理] → [中間結果] → [config2 処理] → [出力 FBX]
 ```
 
 ## 処理フロー
@@ -135,32 +161,67 @@ blender --background --python retarget_script.py -- \
 `add_pose_from_json()` での delta_matrix 処理：
 
 ```python
-# delta_matrix が存在する場合は直接使用
-if 'delta_matrix' in bone_pose:
-    delta_matrix = list_to_matrix(bone_pose['delta_matrix'])
-# 存在しない場合は location/rotation/scale から再構築
-elif 'location' in bone_pose and 'rotation' in bone_pose and 'scale' in bone_pose:
-    delta_loc = Vector(bone_pose['location'])
-    delta_rot = Euler([math.radians(x) for x in bone_pose['rotation']], 'XYZ')
-    delta_scale = Vector(bone_pose['scale'])
-    delta_matrix = Translation @ Rotation @ Scale
+# delta_matrix を直接取得（必須）
+delta_matrix = list_to_matrix(pose_data[source_humanoid_bone]['delta_matrix'])
+
+if invert:
+    delta_matrix = delta_matrix.inverted()
+
+# 現在の行列に適用
+combined_matrix = delta_matrix @ current_world_matrix
+
+# ローカル空間に変換して適用
+bone.matrix = armature_obj.matrix_world.inverted() @ combined_matrix
 ```
 
-> **重要**: Unity パッケージ同梱のスクリプトは `delta_matrix` を**必須**として期待します。
-> フォールバック処理がない場合があるため、MochiFitter-Kai は `delta_matrix` を常に出力します。
+> **重要**: スクリプトは `delta_matrix` を**必須**として直接参照します。
+> `location/rotation/scale` からのフォールバック処理は**存在しません**。
+> `delta_matrix` が欠けている場合は例外が発生します。
+>
+> このため、MochiFitter-Kai は `delta_matrix` を常に出力します。
 
-## コマンドライン引数
+## コマンドライン引数（全体）
+
+### 必須引数
 
 | 引数 | 説明 |
 |------|------|
-| `--base` | ベース Blender ファイル (.blend) |
-| `--config` | config JSON ファイルパス |
+| `--input` | 入力衣装 FBX ファイル |
 | `--output` | 出力 FBX ファイルパス |
+| `--base` | ベース Blender ファイル (.blend) |
+| `--base-fbx` | ベースアバター FBX（セミコロン区切りで複数可） |
+| `--config` | config JSON（セミコロン区切りで複数可） |
+| `--init-pose` | 初期ポーズ JSON ファイル |
+
+### オプション引数
+
+| 引数 | 説明 |
+|------|------|
+| `--hips-position` | ターゲット Hips ボーン位置（x,y,z 形式） |
+| `--blend-shapes` | 適用するブレンドシェイプ（セミコロン区切り） |
+| `--blend-shape-values` | ブレンドシェイプ強度（セミコロン区切り） |
+| `--blend-shape-mappings` | ブレンドシェイプマッピング（label,name ペア） |
+| `--target-meshes` | 処理対象メッシュ名（セミコロン区切り） |
 | `--cloth-metadata` | 衣装メタデータファイル |
 | `--mesh-material-data` | メッシュマテリアルデータ |
+| `--mesh-renderers` | メッシュレンダラー情報 |
+| `--shape-name-file` | シェイプキー名 JSON ファイル |
+| `--name-conv` | ボーン名変換データ |
 | `--no-subdivision` | サブディビジョンを無効化 |
 | `--no-triangle` | 三角形化を無効化 |
-| `--name-conv` | ボーン名変換データ |
+
+## 出力ファイル
+
+処理完了時に以下のファイルが生成されます：
+
+| ファイル | 説明 |
+|---------|------|
+| `{output}.fbx` | リターゲット済みメッシュ |
+| `{output}.blend` | 処理後の Blender シーン（デバッグ用） |
+| `{output}_error_XXX.blend` | エラー発生時のシーン（デバッグ用） |
+
+> **Note**: `.blend` ファイルは処理の最終状態を保存しており、
+> 問題発生時のデバッグに役立ちます。
 
 ## 依存関係
 

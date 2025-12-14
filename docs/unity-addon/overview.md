@@ -89,15 +89,20 @@ Unity が Blender をバックグラウンドで起動し、リターゲット�
 ```
 Unity
   └── subprocess.Popen()
-        └── blender --background --python retarget_script.py -- config.json
+        └── blender --background --python retarget_script.py -- \
+              --input ... --output ... --base ... --base-fbx ... \
+              --config ... --init-pose ... [その他オプション]
 ```
+
+> **Note**: スクリプトは多数の必須引数を要求します。
+> 詳細は [blender_script.md](blender_script.md) を参照してください。
 
 リターゲットスクリプトが行う処理：
 
 1. FBX ファイルの読み込み
-2. posediff JSON からポーズ適用
+2. posediff JSON からポーズ適用（`delta_matrix` 使用）
 3. deformation NPZ から変形フィールド適用
-4. リターゲット済み FBX の出力
+4. リターゲット済み FBX + .blend ファイルの出力
 
 ### Phase 4: 結果の読み込み
 

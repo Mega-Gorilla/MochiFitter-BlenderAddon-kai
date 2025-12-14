@@ -10,11 +10,16 @@ Blender subprocess に渡され、リターゲットスクリプトが読み込�
 
 ## ファイル命名規則
 
+ファイル名は任意ですが、一般的なパターン：
+
 ```
+config_{source}2{target}.json
 config_{source}_to_{target}.json
 ```
 
-例: `config_template2mao.json`（template から mao へのリターゲット設定）
+例:
+- `config_template2mao.json`（template → mao）
+- `config_beryl2template.json`（beryl → template）
 
 ## 構造
 
@@ -74,6 +79,12 @@ config_{source}_to_{target}.json
 | `baseAvatarDataPath` | string | ターゲットアバターの avatar_data JSON |
 | `clothingAvatarDataPath` | string | ソースアバター（衣装側）の avatar_data JSON |
 
+### 任意フィールド
+
+| フィールド | 型 | デフォルト | 説明 |
+|-----------|-----|-----------|------|
+| `doNotUseBasePose` | int | 0 | 1 の場合、ベースポーズを使用しない |
+
 ### ブレンドシェイプ設定
 
 | フィールド | 型 | 説明 |
@@ -120,6 +131,10 @@ config_{source}_to_{target}.json
 | `maskBones` | array | 変形を適用するボーンのリスト（Humanoid ボーン名） |
 | `sourceBlendShapeSettings` | array | ソース側の設定 |
 | `targetBlendShapeSettings` | array | ターゲット側の設定 |
+
+> **注意**: `label` または `sourceLabel` が重複している場合、スクリプトは自動的に
+> `___0`, `___1` などのサフィックスを付加します（例: `Breasts___0`, `Breasts___1`）。
+> 生成されるシェイプキー名に影響するため注意してください。
 
 ## サンプル
 
