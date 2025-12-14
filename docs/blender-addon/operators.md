@@ -41,10 +41,15 @@ def save_armature_pose(armature_obj, filename, avatar_data_file):
 
 #### 前提条件
 - アクティブオブジェクトがArmatureであること
-- ソースアバターデータファイルが設定されていること
+- ソースアバター名が設定されていること
+- ソースアバターデータファイルが設定されていること（常に必要）
+- ターゲットアバターデータファイル（`Invert Pose=True`の場合のみ使用）
+
+> **注意**: `Invert Pose=True`の場合、ターゲットアバターデータファイルが
+> 未設定でも明示的なエラーチェックがありません。事前に設定を確認してください。
 
 #### パラメータ
-- **Invert Pose**: 逆変換を適用するかどうか
+- **Invert Pose**: 逆変換を適用するかどうか（True時はターゲットデータファイルを参照）
 
 ---
 
@@ -52,7 +57,11 @@ def save_armature_pose(armature_obj, filename, avatar_data_file):
 
 **bl_idname**: `object.save_pose_diff`
 
-2つのアバター間のポーズ差分をJSONファイルに保存します。
+現在のArmatureポーズをポーズ差分ファイルとして保存します。
+
+> **注意**: このオペレーターは2つのポーズから差分を「計算」するのではなく、
+> ユーザーが手動で調整した現在のArmatureポーズをそのまま保存します。
+> ファイル名に `_to_` が付くのは命名規則のみです。
 
 #### 前提条件
 - アクティブオブジェクトがArmatureであること
@@ -61,7 +70,7 @@ def save_armature_pose(armature_obj, filename, avatar_data_file):
 
 #### 出力
 - ファイル: `posediff_{source}_to_{target}.json`
-- 場所: Blendファイルと同じフォルダ
+- 場所: ユーザー指定（ExportHelperによるファイル選択ダイアログ）
 
 ---
 
@@ -73,10 +82,15 @@ def save_armature_pose(armature_obj, filename, avatar_data_file):
 
 #### 前提条件
 - アクティブオブジェクトがArmatureであること
-- ターゲットアバターデータファイルが設定されていること
+- ソース/ターゲットアバター名が設定されていること
+- ソースアバターデータファイルが設定されていること（常に必要）
+- ターゲットアバターデータファイル（`Invert Pose=True`の場合のみ使用）
+
+> **注意**: `Invert Pose=True`の場合、ターゲットアバターデータファイルが
+> 未設定でも明示的なエラーチェックがありません。事前に設定を確認してください。
 
 #### パラメータ
-- **Invert Pose**: 逆変換を適用するかどうか
+- **Invert Pose**: 逆変換を適用するかどうか（True時はターゲットデータファイルを参照）
 
 #### 内部処理（delta_matrix読み込み優先順位）
 ```python

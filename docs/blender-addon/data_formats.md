@@ -149,6 +149,10 @@ MochiFitterは以下のデータファイルを使用します：
 1. `delta_matrix` が存在 → 直接使用（最も正確）
 2. `delta_matrix` なし → `location/rotation/scale` から行列を再構築
 
+> **⚠️ 注意**: `delta_matrix`がなく、`rotation`がラジアン単位の旧形式JSONは
+> 正しく読み込めません（新形式と誤認され度として解釈されるため）。
+> 旧形式JSONには必ず`delta_matrix`が含まれている必要があります。
+
 ## deformation_*.npz
 
 RBF補間による変形フィールドデータを保存します（NumPy圧縮形式）。
@@ -176,10 +180,14 @@ RBF補間による変形フィールドデータを保存します（NumPy圧縮
 | `all_delta_positions` | ndarray | 各点での変位ベクトル（shape: [num_steps, num_points, 3]） |
 | `num_steps` | int | 変形を分割したステップ数 |
 | `world_matrix` | ndarray | 4x4のワールド変換行列 |
-| `kdtree_query_k` | int | 最近傍検索で使用する点の数（デフォルト: 27） |
+| `kdtree_query_k` | int | 最近傍検索で使用する点の数（デフォルト: 27）※現在未使用 |
 | `rbf_epsilon` | float | RBFカーネルのεパラメータ |
-| `rbf_smoothing` | float | スムージング係数 |
+| `rbf_smoothing` | float | スムージング係数 ※現在未使用 |
 | `enable_x_mirror` | bool | Xミラーリング有効フラグ（オプション、デフォルト: False） |
+
+> **注意**: `kdtree_query_k`と`rbf_smoothing`は保存されますが、現在の`apply_field_data()`では
+> 参照されていません（近傍点数は`k = min(8, len(field_points))`で固定）。
+> これらは将来の拡張用、またはマルチスレッドプロセッサ用のパラメータです。
 
 ### Xミラーリング
 
