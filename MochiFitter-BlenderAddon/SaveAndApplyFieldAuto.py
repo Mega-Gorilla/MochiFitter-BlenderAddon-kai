@@ -4940,6 +4940,10 @@ def reinstall_numpy_scipy_multithreaded():
             return False, result.stdout, result.stderr
 
         # Step 2: wheel ファイルを展開
+        # zipfile.extractall() は内部で os.makedirs() を使用するため、
+        # Microsoft Store版Blenderで WinError 183 が発生する。
+        # そのため、ファイルを1つずつ展開し、ディレクトリ作成には
+        # cmd /c mkdir を使用する。
         print("wheelファイルを展開中...")
         wheel_files = [f for f in os.listdir(wheels_path) if f.endswith('.whl')]
 
@@ -4948,14 +4952,40 @@ def reinstall_numpy_scipy_multithreaded():
             safe_rmtree(deps_new_path)
             return False, result.stdout, "wheelファイルが見つかりません"
 
+        # 作成済みディレクトリを追跡（重複作成を避ける）
+        created_dirs = set()
+
         for wheel_file in wheel_files:
             wheel_path = os.path.join(wheels_path, wheel_file)
             print(f"  展開中: {wheel_file}")
             try:
                 with zipfile.ZipFile(wheel_path, 'r') as zip_ref:
-                    zip_ref.extractall(deps_new_path)
+                    for member in zip_ref.namelist():
+                        # 展開先パス
+                        target_path = os.path.join(deps_new_path, member)
+
+                        # ディレクトリエントリの場合
+                        if member.endswith('/'):
+                            if target_path not in created_dirs:
+                                create_directory_windows(target_path)
+                                created_dirs.add(target_path)
+                            continue
+
+                        # ファイルの場合：親ディレクトリを作成
+                        parent_dir = os.path.dirname(target_path)
+                        if parent_dir and parent_dir not in created_dirs:
+                            create_directory_windows(parent_dir)
+                            created_dirs.add(parent_dir)
+
+                        # ファイルを展開
+                        with zip_ref.open(member) as source:
+                            with open(target_path, 'wb') as target:
+                                target.write(source.read())
+
             except Exception as e:
                 print(f"  展開エラー: {e}")
+                import traceback
+                traceback.print_exc()
                 safe_rmtree(deps_new_path)
                 return False, result.stdout, f"wheel展開エラー: {e}"
 
