@@ -89,12 +89,13 @@ Unity が Blender をバックグラウンドで起動し、リターゲット�
 ```
 Unity
   └── subprocess.Popen()
-        └── blender --background --python retarget_script.py -- \
+        └── blender --background --python retarget_script2_XX.py -- \
               --input ... --output ... --base ... --base-fbx ... \
               --config ... --init-pose ... [その他オプション]
 ```
 
-> **Note**: スクリプトは多数の必須引数を要求します。
+> **Note**: スクリプト名はバージョンにより異なります（例: `retarget_script2_12.py`）。
+> スクリプトは多数の必須引数を要求します。
 > 詳細は [blender_script.md](blender_script.md) を参照してください。
 
 リターゲットスクリプトが行う処理：

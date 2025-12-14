@@ -196,12 +196,14 @@ config_{source}_to_{target}.json
 
 ```
 Assets/OutfitRetargetingSystem/Editor/
-├── config_source_to_target.json
-├── posediff_source_to_target.json
-├── deformation_source_to_target.npz
-├── avatar_data_source.json
-└── avatar_data_target.json
+├── config_*.json              （リターゲット設定）
+├── posediff_*.json            （ポーズ差分）
+├── deformation_*.npz          （変形フィールド）
+└── avatar_data_*.json         （アバターデータ）
 ```
+
+> **例**: `config_template2mao.json` の場合、同ディレクトリに
+> `posediff_template_to_mao.json`、`deformation_template_to_mao.npz` 等が配置されます。
 
 ## 関連ドキュメント
 

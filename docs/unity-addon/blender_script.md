@@ -216,12 +216,13 @@ bone.matrix = armature_obj.matrix_world.inverted() @ combined_matrix
 
 | ファイル | 説明 |
 |---------|------|
-| `{output}.fbx` | リターゲット済みメッシュ |
-| `{output}.blend` | 処理後の Blender シーン（デバッグ用） |
-| `{output}_error_XXX.blend` | エラー発生時のシーン（デバッグ用） |
+| `{output_base}.fbx` | リターゲット済みメッシュ |
+| `{output_base}.blend` | 処理後の Blender シーン（デバッグ用） |
+| `{output_base}_error_XXX.blend` | エラー発生時のシーン（デバッグ用） |
 
-> **Note**: `.blend` ファイルは処理の最終状態を保存しており、
-> 問題発生時のデバッグに役立ちます。
+> **Note**: `{output_base}` は `--output` 引数から拡張子を除いたベース名です。
+> 例: `--output result.fbx` の場合、`result.fbx`、`result.blend` が生成されます。
+> `.blend` ファイルは処理の最終状態を保存しており、問題発生時のデバッグに役立ちます。
 
 ## 依存関係
 
