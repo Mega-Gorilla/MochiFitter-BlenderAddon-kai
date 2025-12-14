@@ -1,12 +1,14 @@
 # Unity Addon Documentation
 
-Coming soon (Phase 2)
+Phase 2 ドキュメント（作成中）
 
-This directory will contain documentation for the MochiFitter Unity addon.
+## 現在のコンテンツ
 
-## Planned Content
+- [UPSTREAM_CHANGELOG.md](UPSTREAM_CHANGELOG.md) - 本家 Unity アドオンの更新履歴
 
-- Architecture overview
-- Data formats used by Unity
-- Integration with VRChat SDK
-- Prefab generation workflow
+## 予定コンテンツ
+
+- アーキテクチャ概要
+- Unity 側のデータフォーマット
+- VRChat SDK との連携
+- Prefab 生成ワークフロー
