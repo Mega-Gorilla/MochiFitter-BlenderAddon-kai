@@ -187,7 +187,10 @@ def save_armature_pose(armature_obj, filename="pose_data.json", avatar_data_file
         scale = delta_matrix.to_scale()
 
         # データを辞書に格納（Humanoidボーン名をキーとして使用）
+        # delta_matrix: Unity側スクリプトとの互換性のため必須
+        # location/rotation/scale: 参考値（デバッグ用）
         pose_data[humanoid_name] = {
+            'delta_matrix': matrix_to_list(delta_matrix),
             'location': [location.x, location.y, location.z],
             'rotation': [math.degrees(rotation.x),
                         math.degrees(rotation.y),
@@ -360,13 +363,21 @@ def apply_finger_bone_adjustments(
         # 新しい行列を適用
         pose_bone.matrix = new_matrix
 
+def matrix_to_list(matrix):
+    """
+    Matrix型からリストに変換する（JSON保存用）
+
+    Parameters:
+        matrix: Matrix - Blenderの行列オブジェクト
+
+    Returns:
+        list: 行列を2次元リストに変換したもの
+    """
+    return [list(row) for row in matrix]
+
 def list_to_matrix(matrix_list):
     """
-    リストからMatrix型に変換する（古いJSONフォーマットのフォールバック用）
-
-    Note:
-        この関数は delta_matrix フィールドを含む古いposediff JSONとの
-        後方互換性のために残されています。新しいJSONでは使用されません。
+    リストからMatrix型に変換する（JSON読み込み用）
 
     Parameters:
         matrix_list: list - 行列のデータを含む2次元リスト

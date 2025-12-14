@@ -11,11 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unity側Blenderスクリプト (`retarget_script2_10.py`) をリポジトリに追加
   - GPL v3 ライセンスのため公開可能
   - パス: `MochFitter-unity-addon/BlenderTools/blender-4.0.2-windows-x64/dev/`
+- `matrix_to_list()` 関数を追加（JSON保存用）
 
 ### Changed
-- `delta_matrix` を最優先に変更 - 旧形式JSONとの完全互換性を実現
+- `delta_matrix` の出力を復活 - Unity パッケージ同梱スクリプトとの互換性を維持 (Issue #1 方針変更)
+  - 本リポジトリの修正範囲を Blender アドオンに限定したため
+  - Unity パッケージ同梱の Blender スクリプトは `delta_matrix` を必須として期待（フォールバックなし）
+  - `save_armature_pose()` で `delta_matrix` を JSON に保存
+  - `location/rotation/scale` も同時に保存（参考値として）
+- `add_pose_from_json()` は `delta_matrix` を最優先で使用
   - `delta_matrix` が存在する場合はそれを直接使用（最も正確）
-  - `delta_matrix` がない新形式JSONでのみ `location`, `rotation`, `scale` から再構築
+  - `delta_matrix` がない場合のみ `location`, `rotation`, `scale` から再構築
   - 旧形式JSONでの rotation 単位問題（ラジアン vs 度）を回避
 
 ### Fixed
@@ -25,9 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 旧形式posediff JSONでの座標破綻を修正
   - 旧形式はrotationをラジアンで保存、新形式は度で保存
   - `delta_matrix` 優先により旧形式JSONでの読み込み精度が向上
-
-### Removed
-- 未使用の `matrix_to_list()` 関数を削除
 
 ## [0.2.1] - 2025-12-14
 
