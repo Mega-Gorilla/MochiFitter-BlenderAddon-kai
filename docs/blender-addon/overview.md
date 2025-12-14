@@ -11,8 +11,11 @@ RBF（Radial Basis Function）補間を使用して、異なるアバター体�
 MochiFitter-BlenderAddon/
 ├── SaveAndApplyFieldAuto.py      # メインアドオンモジュール
 ├── rbf_multithread_processor.py  # マルチスレッド処理用外部スクリプト
-└── deps/                         # 依存ライブラリ（scipy等）
+└── deps/                         # 依存ライブラリ（scipy等）※
 ```
+
+> **※ deps/ディレクトリについて**: このディレクトリはリポジトリには含まれていません。
+> アドオンのUIから「NumPy・SciPy マルチスレッド版 再インストール」ボタンを実行すると自動生成されます。
 
 ## 主要コンポーネント
 

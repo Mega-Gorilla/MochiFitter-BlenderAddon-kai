@@ -163,7 +163,8 @@ RBF補間による変形フィールドデータを保存します（NumPy圧縮
     'world_matrix': array,          # ワールド行列（現在は単位行列）
     'kdtree_query_k': int,          # KDTree検索のk値
     'rbf_epsilon': float,           # RBFのεパラメータ
-    'rbf_smoothing': float          # スムージングパラメータ
+    'rbf_smoothing': float,         # スムージングパラメータ
+    'enable_x_mirror': bool         # Xミラーリング有効フラグ（オプション）
 }
 ```
 
@@ -178,12 +179,13 @@ RBF補間による変形フィールドデータを保存します（NumPy圧縮
 | `kdtree_query_k` | int | 最近傍検索で使用する点の数（デフォルト: 27） |
 | `rbf_epsilon` | float | RBFカーネルのεパラメータ |
 | `rbf_smoothing` | float | スムージング係数 |
+| `enable_x_mirror` | bool | Xミラーリング有効フラグ（オプション、デフォルト: False） |
 
 ### Xミラーリング
 
 `rbf_enable_x_mirror=True` の場合：
-- 保存時: X座標が0以上のデータのみ保存
-- 読み込み時: 自動的にX軸でミラーリング
+- 保存時: X座標が0以上のデータのみ保存（NPZキー: `enable_x_mirror=True`）
+- 読み込み時: `enable_x_mirror`フラグを確認し、自動的にX軸でミラーリング
 
 ## データフロー図
 

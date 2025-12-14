@@ -23,7 +23,7 @@ MochiFitter Blenderアドオンは以下のオペレーターを提供します�
 
 #### 内部処理
 ```python
-# SaveAndApplyFieldAuto.py: 134-205行
+# SaveAndApplyFieldAuto.py: save_armature_pose()
 def save_armature_pose(armature_obj, filename, avatar_data_file):
     # 1. アバターデータからHumanoidボーンマッピングを取得
     # 2. 各ボーンのワールド空間での変換を計算
@@ -80,7 +80,7 @@ def save_armature_pose(armature_obj, filename, avatar_data_file):
 
 #### 内部処理（delta_matrix読み込み優先順位）
 ```python
-# SaveAndApplyFieldAuto.py: 509-528行
+# SaveAndApplyFieldAuto.py: add_pose_from_json()
 def add_pose_from_json(...):
     # 1. delta_matrixが存在する場合 → 直接使用（最も正確）
     if 'delta_matrix' in bone_pose:
@@ -168,7 +168,7 @@ def add_pose_from_json(...):
 
 #### 内部処理
 ```python
-# SaveAndApplyFieldAuto.py: 1932-2128行
+# SaveAndApplyFieldAuto.py: apply_field_data()
 def apply_field_data(target_obj, field_data_path, shape_key_name):
     # 1. NPZファイルから変形フィールドを読み込み
     # 2. KDTreeで最近傍点を検索
