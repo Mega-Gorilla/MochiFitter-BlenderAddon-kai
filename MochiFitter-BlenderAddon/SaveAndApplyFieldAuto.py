@@ -4713,22 +4713,20 @@ def clean_deps_directory(deps_path: str) -> tuple:
     Returns:
         tuple: (success: bool, error_message: str)
     """
-    if not os.path.exists(deps_path):
-        try:
-            os.makedirs(deps_path)
-            return True, ""
-        except OSError as e:
-            return False, f"deps ディレクトリの作成に失敗: {str(e)}"
-
     try:
-        shutil.rmtree(deps_path)
-        os.makedirs(deps_path)
+        # 既存ディレクトリがあれば削除
+        if os.path.exists(deps_path):
+            shutil.rmtree(deps_path)
+
+        # ディレクトリを作成（exist_ok=True で競合状態を回避）
+        # Windows では rmtree 直後に makedirs が失敗することがあるため
+        os.makedirs(deps_path, exist_ok=True)
         print(f"deps ディレクトリをクリーンアップしました: {deps_path}")
         return True, ""
     except PermissionError:
         return False, "ファイルがロックされています。Blenderを再起動してから再実行してください"
     except OSError as e:
-        return False, f"deps ディレクトリの削除に失敗: {str(e)}"
+        return False, f"deps ディレクトリの操作に失敗: {str(e)}"
 
 def reinstall_numpy_scipy_multithreaded():
     """
