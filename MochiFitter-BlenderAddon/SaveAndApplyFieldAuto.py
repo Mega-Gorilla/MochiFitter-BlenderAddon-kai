@@ -4699,39 +4699,79 @@ def get_scipy_version():
     except Exception:
         return None
 
-def clean_deps_directory(deps_path: str) -> tuple:
+def _rmtree_onerror(func, path, exc_info):
     """
-    deps ディレクトリをクリーンアップ
+    shutil.rmtree の onerror ハンドラー
 
-    pip install --target の前に既存ファイルを削除する。
-    ファイルがロックされている場合（scipy がロード済みの場合など）は
-    PermissionError をキャッチしてユーザーに再起動を促す。
+    Windows で read-only 属性のファイルを削除できるようにする。
+    """
+    import stat
+    # read-only 属性を解除して再試行
+    if not os.access(path, os.W_OK):
+        os.chmod(path, stat.S_IWUSR)
+        func(path)
+    else:
+        raise exc_info[1]
+
+def safe_rmtree(path: str) -> tuple:
+    """
+    安全にディレクトリを削除する
 
     Args:
-        deps_path: deps ディレクトリのパス
+        path: 削除するディレクトリのパス
 
     Returns:
-        tuple: (success: bool, error_message: str)
+        tuple: (success: bool, error_type: str, error_message: str)
+            error_type: "LOCK", "ERROR", "" (成功時)
+    """
+    if not os.path.exists(path):
+        return True, "", ""
+
+    try:
+        shutil.rmtree(path, onerror=_rmtree_onerror)
+        return True, "", ""
+    except PermissionError as e:
+        return False, "LOCK", f"ファイルがロックされています。Blenderを再起動してから再実行してください: {e}"
+    except OSError as e:
+        return False, "ERROR", f"ディレクトリの削除に失敗: {str(e)}"
+
+def safe_rename(src: str, dst: str) -> tuple:
+    """
+    安全にディレクトリをリネームする
+
+    Args:
+        src: 元のパス
+        dst: 新しいパス
+
+    Returns:
+        tuple: (success: bool, error_type: str, error_message: str)
     """
     try:
-        # 既存ディレクトリがあれば削除
-        if os.path.exists(deps_path):
-            shutil.rmtree(deps_path)
+        if os.path.exists(dst):
+            # 既存の dst を削除
+            success, err_type, err_msg = safe_rmtree(dst)
+            if not success:
+                return False, err_type, err_msg
 
-        # ディレクトリを作成（exist_ok=True で競合状態を回避）
-        # Windows では rmtree 直後に makedirs が失敗することがあるため
-        os.makedirs(deps_path, exist_ok=True)
-        print(f"deps ディレクトリをクリーンアップしました: {deps_path}")
-        return True, ""
-    except PermissionError:
-        return False, "ファイルがロックされています。Blenderを再起動してから再実行してください"
+        os.rename(src, dst)
+        return True, "", ""
+    except PermissionError as e:
+        return False, "LOCK", f"ファイルがロックされています。Blenderを再起動してから再実行してください: {e}"
     except OSError as e:
-        return False, f"deps ディレクトリの操作に失敗: {str(e)}"
+        return False, "ERROR", f"リネームに失敗: {str(e)}"
 
 def reinstall_numpy_scipy_multithreaded():
     """
     numpyとscipyをマルチスレッド対応版で強制再インストール
-    
+
+    安全なインストール方式:
+    1. 一時ディレクトリ (deps_new) にインストール
+    2. 成功したら既存の deps を deps_old にリネーム
+    3. deps_new を deps にリネーム
+    4. deps_old を削除
+
+    これにより pip 失敗時も既存の deps が保持される。
+
     Returns:
         tuple: (success: bool, output: str, error: str)
     """
@@ -4739,15 +4779,15 @@ def reinstall_numpy_scipy_multithreaded():
         # 現在のnumpyとscipyのバージョンを取得
         numpy_version = get_numpy_version()
         scipy_version = get_scipy_version()
-        
+
         if not numpy_version:
             return False, "", "numpy が見つかりません"
-        
+
         # BlenderのPythonパスを取得
         python_path = get_blender_python_path()
         if not python_path or not os.path.exists(python_path):
             return False, "", f"Pythonパスが見つかりません: {python_path}"
-        
+
         # インストールするパッケージリストを作成
         packages = [f"numpy=={numpy_version}"]
         if scipy_version:
@@ -4755,36 +4795,43 @@ def reinstall_numpy_scipy_multithreaded():
         else:
             # scipyがインストールされていない場合は最新版をインストール
             packages.append("scipy")
-        
-        libs_path = os.path.join(os.path.dirname(__file__), 'deps')
 
-        # deps ディレクトリをクリーンアップ（既存ファイルとの競合を防止）
+        addon_dir = os.path.dirname(__file__)
+        deps_path = os.path.join(addon_dir, 'deps')
+        deps_new_path = os.path.join(addon_dir, 'deps_new')
+        deps_old_path = os.path.join(addon_dir, 'deps_old')
+
         print(f"\n{'='*60}")
         print(f"NumPy・SciPy マルチスレッド対応再インストール開始")
         print(f"{'='*60}")
-        print(f"deps ディレクトリをクリーンアップ中: {libs_path}")
-
-        cleanup_success, cleanup_error = clean_deps_directory(libs_path)
-        if not cleanup_success:
-            print(f"クリーンアップ失敗: {cleanup_error}")
-            return False, "", cleanup_error
-
-        # pip install コマンドを実行（--force-reinstall は不要、クリーンな状態のため）
-        cmd = [python_path, "-m", "pip", "install", "--target", libs_path] + packages
-
-        print(f"クリーンアップ完了")
         print(f"NumPy バージョン: {numpy_version}")
         if scipy_version:
             print(f"SciPy バージョン: {scipy_version}")
         else:
             print("SciPy: インストールされていません（新規インストールします）")
+
+        # 一時ディレクトリをクリーンアップ（前回の失敗時のゴミを削除）
+        for tmp_path in [deps_new_path, deps_old_path]:
+            if os.path.exists(tmp_path):
+                print(f"一時ディレクトリを削除中: {tmp_path}")
+                success, err_type, err_msg = safe_rmtree(tmp_path)
+                if not success:
+                    print(f"一時ディレクトリの削除に失敗: {err_msg}")
+                    return False, "", err_msg
+
+        # 一時ディレクトリを作成
+        os.makedirs(deps_new_path, exist_ok=True)
+        print(f"一時ディレクトリを作成: {deps_new_path}")
+
+        # pip install を一時ディレクトリに実行
+        cmd = [python_path, "-m", "pip", "install", "--target", deps_new_path] + packages
         print(f"実行コマンド: {' '.join(cmd)}")
-        
+
         # 環境変数を設定
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
         env['PYTHONLEGACYWINDOWSSTDIO'] = '1'
-        
+
         # コマンドを実行
         result = subprocess.run(
             cmd,
@@ -4794,19 +4841,56 @@ def reinstall_numpy_scipy_multithreaded():
             errors='replace',
             env=env
         )
-        
+
         print(f"実行結果 (return code: {result.returncode}):")
         print(f"出力:\n{result.stdout}")
-        
+
         if result.stderr:
             print(f"エラー出力:\n{result.stderr}")
-        
-        success = result.returncode == 0
-        return success, result.stdout, result.stderr
-        
+
+        # pip が失敗した場合、一時ディレクトリを削除して終了
+        if result.returncode != 0:
+            print("pip install が失敗しました。既存の deps は保持されます。")
+            safe_rmtree(deps_new_path)
+            return False, result.stdout, result.stderr
+
+        # pip 成功: ディレクトリを置き換え
+        print("pip install 成功。ディレクトリを置き換え中...")
+
+        # 既存の deps があれば deps_old にリネーム
+        if os.path.exists(deps_path):
+            print(f"既存の deps を deps_old に移動中...")
+            success, err_type, err_msg = safe_rename(deps_path, deps_old_path)
+            if not success:
+                print(f"deps のリネームに失敗: {err_msg}")
+                # 失敗しても新しい deps_new は残す（手動復旧用）
+                return False, result.stdout, err_msg
+
+        # deps_new を deps にリネーム
+        print(f"deps_new を deps に移動中...")
+        success, err_type, err_msg = safe_rename(deps_new_path, deps_path)
+        if not success:
+            print(f"deps_new のリネームに失敗: {err_msg}")
+            # deps_old を deps に戻す
+            if os.path.exists(deps_old_path):
+                safe_rename(deps_old_path, deps_path)
+            return False, result.stdout, err_msg
+
+        # deps_old を削除（失敗しても警告のみ）
+        if os.path.exists(deps_old_path):
+            print(f"古い deps_old を削除中...")
+            success, _, err_msg = safe_rmtree(deps_old_path)
+            if not success:
+                print(f"警告: deps_old の削除に失敗しました（手動で削除してください）: {err_msg}")
+
+        print("ディレクトリの置き換え完了")
+        return True, result.stdout, result.stderr
+
     except Exception as e:
         error_msg = f"NumPy・SciPy再インストール中にエラーが発生しました: {str(e)}"
         print(error_msg)
+        import traceback
+        traceback.print_exc()
         return False, "", error_msg
 
 
@@ -4840,14 +4924,11 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
                 self.report({'WARNING'}, f"{packages_info} を再インストールしました。Blenderを再起動してください")
                 print(f"NumPy・SciPy再インストール成功。Blenderを再起動してください。")
             else:
-                # ファイルロック時は明確なメッセージを表示
-                if "ロック" in error or "PermissionError" in error:
+                # エラーメッセージをそのまま表示（ロック時は関数側で明確なメッセージを返す）
+                if error:
                     self.report({'ERROR'}, error)
                 else:
-                    error_msg = f"NumPy・SciPy再インストールに失敗しました"
-                    if error:
-                        error_msg += f": {error}"
-                    self.report({'ERROR'}, error_msg)
+                    self.report({'ERROR'}, "NumPy・SciPy再インストールに失敗しました")
             
             return {'FINISHED'}
         
