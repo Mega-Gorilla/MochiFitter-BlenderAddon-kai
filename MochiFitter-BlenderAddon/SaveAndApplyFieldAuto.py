@@ -5033,60 +5033,98 @@ def reinstall_numpy_scipy_multithreaded():
         return False, "", error_msg
 
 
-# numpy・scipy再インストールオペレーター
+# numpy・scipy再インストールオペレーター（Modal版 - UIフリーズ回避）
 class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
     bl_idname = "rbf.reinstall_numpy_scipy_multithreaded"
     bl_label = "Reinstall NumPy & SciPy (Multithreaded)"
     bl_description = "numpyとscipyをマルチスレッド対応版で強制再インストール"
-    
-    def execute(self, context):
-        try:
-            # 現在のバージョンを取得
-            numpy_version = get_numpy_version()
-            scipy_version = get_scipy_version()
-            
-            if not numpy_version:
-                self.report({'ERROR'}, "numpy が見つかりません")
-                return {'CANCELLED'}
-            
-            # 再インストールを実行
-            success, output, error = reinstall_numpy_scipy_multithreaded()
-            
-            if success:
-                packages_info = f"NumPy {numpy_version}"
-                if scipy_version:
-                    packages_info += f", SciPy {scipy_version}"
-                else:
-                    packages_info += ", SciPy (新規インストール)"
 
-                # 成功時は WARNING で再起動を促す
-                self.report({'WARNING'}, f"{packages_info} を再インストールしました。Blenderを再起動してください")
-                print(f"NumPy・SciPy再インストール成功。Blenderを再起動してください。")
-            else:
-                # エラーメッセージをそのまま表示（ロック時は関数側で明確なメッセージを返す）
-                if error:
-                    self.report({'ERROR'}, error)
+    # インストールスレッドの状態を保持
+    _timer = None
+    _thread = None
+    _result = None  # (success, output, error)
+    _numpy_version = None
+    _scipy_version = None
+
+    def modal(self, context, event):
+        if event.type == 'TIMER':
+            # スレッドの完了をチェック
+            if self._thread is not None and not self._thread.is_alive():
+                # タイマーを停止
+                context.window_manager.event_timer_remove(self._timer)
+                self._timer = None
+
+                # 結果を取得
+                success, output, error = self._result if self._result else (False, "", "Unknown error")
+
+                if success:
+                    packages_info = f"NumPy {self._numpy_version}"
+                    if self._scipy_version:
+                        packages_info += f", SciPy {self._scipy_version}"
+                    else:
+                        packages_info += ", SciPy (新規インストール)"
+
+                    self.report({'WARNING'}, f"{packages_info} を再インストールしました。Blenderを再起動してください")
+                    print(f"NumPy・SciPy再インストール成功。Blenderを再起動してください。")
                 else:
-                    self.report({'ERROR'}, "NumPy・SciPy再インストールに失敗しました")
-            
-            return {'FINISHED'}
-        
-        except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
-            print(error_msg)
-            self.report({'ERROR'}, error_msg)
+                    if error:
+                        self.report({'ERROR'}, error)
+                    else:
+                        self.report({'ERROR'}, "NumPy・SciPy再インストールに失敗しました")
+
+                # UIを更新
+                for area in context.screen.areas:
+                    area.tag_redraw()
+
+                return {'FINISHED'}
+
+        return {'PASS_THROUGH'}
+
+    def execute(self, context):
+        import threading
+
+        # 現在のバージョンを取得
+        self._numpy_version = get_numpy_version()
+        self._scipy_version = get_scipy_version()
+
+        if not self._numpy_version:
+            self.report({'ERROR'}, "numpy が見つかりません")
             return {'CANCELLED'}
-    
+
+        # インストールを別スレッドで実行
+        def run_install():
+            try:
+                self._result = reinstall_numpy_scipy_multithreaded()
+            except Exception as e:
+                self._result = (False, "", str(e))
+
+        self._thread = threading.Thread(target=run_install)
+        self._thread.start()
+
+        # タイマーを設定（0.5秒ごとにチェック）
+        self._timer = context.window_manager.event_timer_add(0.5, window=context.window)
+        context.window_manager.modal_handler_add(self)
+
+        self.report({'INFO'}, "インストール中... (バックグラウンドで実行中)")
+
+        return {'RUNNING_MODAL'}
+
     def invoke(self, context, event):
         # 実行前に確認ダイアログを表示
         numpy_version = get_numpy_version()
         scipy_version = get_scipy_version()
-        
+
         if numpy_version:
             return context.window_manager.invoke_confirm(self, event)
         else:
             self.report({'ERROR'}, "numpy が見つかりません")
             return {'CANCELLED'}
+
+    def cancel(self, context):
+        # キャンセル時にタイマーをクリーンアップ
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
 
 
 # デバッグ用オペレーター：外部Pythonでscipyテスト
