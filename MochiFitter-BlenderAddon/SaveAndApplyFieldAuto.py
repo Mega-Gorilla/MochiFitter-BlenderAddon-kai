@@ -5073,14 +5073,23 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
     _result = None  # (success, output, error)
     _numpy_version = None
     _scipy_version = None
+    _dot_count = 0  # アニメーション用カウンター
 
     def modal(self, context, event):
         if event.type == 'TIMER':
+            # ステータスバーのアニメーション更新
+            self._dot_count = (self._dot_count + 1) % 4
+            dots = "." * (self._dot_count + 1)
+            context.workspace.status_text_set(f"NumPy・SciPy インストール中{dots}")
+
             # スレッドの完了をチェック
             if self._thread is not None and not self._thread.is_alive():
                 # タイマーを停止
                 context.window_manager.event_timer_remove(self._timer)
                 self._timer = None
+
+                # ステータスバーをクリア
+                context.workspace.status_text_set(None)
 
                 # 結果を取得
                 success, output, error = self._result if self._result else (False, "", "Unknown error")
@@ -5153,6 +5162,10 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
         self._timer = context.window_manager.event_timer_add(0.5, window=context.window)
         context.window_manager.modal_handler_add(self)
 
+        # ステータスバーに表示開始
+        self._dot_count = 0
+        context.workspace.status_text_set("NumPy・SciPy インストール中.")
+
         self.report({'INFO'}, "インストール中... (バックグラウンドで実行中)")
 
         return {'RUNNING_MODAL'}
@@ -5173,6 +5186,8 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
         if self._timer is not None:
             context.window_manager.event_timer_remove(self._timer)
             self._timer = None
+        # ステータスバーをクリア
+        context.workspace.status_text_set(None)
 
 
 # デバッグ用オペレーター：外部Pythonでscipyテスト
