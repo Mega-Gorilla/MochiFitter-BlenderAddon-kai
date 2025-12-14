@@ -4840,13 +4840,68 @@ def reinstall_numpy_scipy_multithreaded():
 
         # 一時ディレクトリを作成
         print(f"一時ディレクトリを作成中: {deps_new_path}")
+
+        # デバッグ: 親ディレクトリの内容を確認
+        print(f"  [DEBUG] 親ディレクトリの内容を確認: {addon_dir}")
+        try:
+            parent_contents = os.listdir(addon_dir)
+            print(f"  [DEBUG] 親ディレクトリ内のアイテム数: {len(parent_contents)}")
+            # deps 関連のみ表示
+            deps_related = [f for f in parent_contents if 'deps' in f.lower()]
+            print(f"  [DEBUG] deps 関連アイテム: {deps_related}")
+        except Exception as list_err:
+            print(f"  [DEBUG] listdir 失敗: {list_err}")
+
+        # デバッグ: パスの各種チェック
+        print(f"  [DEBUG] deps_new_path = {deps_new_path}")
+        print(f"  [DEBUG] os.path.exists() = {os.path.exists(deps_new_path)}")
+        print(f"  [DEBUG] os.path.isdir() = {os.path.isdir(deps_new_path)}")
+        print(f"  [DEBUG] os.path.isfile() = {os.path.isfile(deps_new_path)}")
+        print(f"  [DEBUG] os.path.islink() = {os.path.islink(deps_new_path)}")
+
+        # デバッグ: os.lstat でより詳細な情報を取得
+        try:
+            stat_info = os.lstat(deps_new_path)
+            print(f"  [DEBUG] lstat 成功: mode={oct(stat_info.st_mode)}, size={stat_info.st_size}")
+        except FileNotFoundError:
+            print(f"  [DEBUG] lstat: FileNotFoundError（ファイルは存在しない）")
+        except Exception as stat_err:
+            print(f"  [DEBUG] lstat 失敗: {stat_err}")
+
+        # デバッグ: os.access でアクセス権を確認
+        try:
+            print(f"  [DEBUG] 親ディレクトリ書き込み権限: {os.access(addon_dir, os.W_OK)}")
+        except Exception as acc_err:
+            print(f"  [DEBUG] access チェック失敗: {acc_err}")
+
+        # makedirs を試行
         try:
             os.makedirs(deps_new_path, exist_ok=True)
             print(f"一時ディレクトリを作成しました")
         except OSError as e:
-            # それでも失敗する場合は詳細を出力
             print(f"makedirs 失敗: {e}")
-            print(f"  パス存在チェック: os.path.exists={os.path.exists(deps_new_path)}, isdir={os.path.isdir(deps_new_path)}, isfile={os.path.isfile(deps_new_path)}")
+            print(f"  エラーコード: errno={e.errno}, winerror={getattr(e, 'winerror', 'N/A')}")
+
+            # 代替手段: os.mkdir を試す
+            print(f"  [DEBUG] 代替手段: os.mkdir を試行")
+            try:
+                os.mkdir(deps_new_path)
+                print(f"  [DEBUG] os.mkdir 成功!")
+            except OSError as mkdir_err:
+                print(f"  [DEBUG] os.mkdir も失敗: {mkdir_err}")
+
+                # さらに代替手段: 別の名前で試す
+                import time
+                alt_path = os.path.join(addon_dir, f'deps_new_{int(time.time())}')
+                print(f"  [DEBUG] 代替パスで試行: {alt_path}")
+                try:
+                    os.mkdir(alt_path)
+                    print(f"  [DEBUG] 代替パス成功! deps_new に問題あり")
+                    # 成功したら代替パスを使用
+                    os.rmdir(alt_path)
+                except OSError as alt_err:
+                    print(f"  [DEBUG] 代替パスも失敗: {alt_err}")
+
             return False, "", f"一時ディレクトリの作成に失敗: {e}"
 
         # pip install を一時ディレクトリに実行
