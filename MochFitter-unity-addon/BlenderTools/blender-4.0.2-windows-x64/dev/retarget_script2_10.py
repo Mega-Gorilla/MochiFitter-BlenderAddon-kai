@@ -3152,9 +3152,15 @@ def add_pose_from_json(armature_obj, filepath, avatar_data, invert=False):
         current_world_matrix = armature_obj.matrix_world @ original_data['matrix']
 
         # 差分変換行列を取得
-        # location/rotation/scaleフィールドを優先、なければdelta_matrixにフォールバック
+        # delta_matrixが存在する場合は優先的に使用（旧形式JSONとの互換性）
+        # delta_matrixがない場合のみlocation/rotation/scaleから再構築（新形式JSON）
         bone_pose = pose_data[source_humanoid_bone]
-        if 'location' in bone_pose and 'rotation' in bone_pose and 'scale' in bone_pose:
+        if 'delta_matrix' in bone_pose:
+            # 旧形式: delta_matrixを直接使用（最も正確）
+            delta_matrix = list_to_matrix(bone_pose['delta_matrix'])
+        elif 'location' in bone_pose and 'rotation' in bone_pose and 'scale' in bone_pose:
+            # 新形式: location/rotation/scaleから行列を再構築
+            # rotation値は度で保存されているのでラジアンに変換
             delta_loc = Vector(bone_pose['location'])
             delta_rot = Euler([math.radians(x) for x in bone_pose['rotation']], 'XYZ')
             delta_scale = Vector(bone_pose['scale'])
@@ -3163,8 +3169,6 @@ def add_pose_from_json(armature_obj, filepath, avatar_data, invert=False):
                         Matrix.Scale(delta_scale.x, 4, (1, 0, 0)) @ \
                         Matrix.Scale(delta_scale.y, 4, (0, 1, 0)) @ \
                         Matrix.Scale(delta_scale.z, 4, (0, 0, 1))
-        elif 'delta_matrix' in bone_pose:
-            delta_matrix = list_to_matrix(bone_pose['delta_matrix'])
         else:
             print(f"Warning: No valid pose data for {source_humanoid_bone}, skipping")
             continue
@@ -3312,9 +3316,15 @@ def add_clothing_pose_from_json(armature_obj, pose_filepath="pose_data.json", in
         current_world_matrix = armature_obj.matrix_world @ bone.matrix
 
         # 差分変換行列を取得
-        # location/rotation/scaleフィールドを優先、なければdelta_matrixにフォールバック
+        # delta_matrixが存在する場合は優先的に使用（旧形式JSONとの互換性）
+        # delta_matrixがない場合のみlocation/rotation/scaleから再構築（新形式JSON）
         bone_pose = pose_data[source_humanoid_bone]
-        if 'location' in bone_pose and 'rotation' in bone_pose and 'scale' in bone_pose:
+        if 'delta_matrix' in bone_pose:
+            # 旧形式: delta_matrixを直接使用（最も正確）
+            delta_matrix = list_to_matrix(bone_pose['delta_matrix'])
+        elif 'location' in bone_pose and 'rotation' in bone_pose and 'scale' in bone_pose:
+            # 新形式: location/rotation/scaleから行列を再構築
+            # rotation値は度で保存されているのでラジアンに変換
             delta_loc = Vector(bone_pose['location'])
             delta_rot = Euler([math.radians(x) for x in bone_pose['rotation']], 'XYZ')
             delta_scale = Vector(bone_pose['scale'])
@@ -3323,8 +3333,6 @@ def add_clothing_pose_from_json(armature_obj, pose_filepath="pose_data.json", in
                         Matrix.Scale(delta_scale.x, 4, (1, 0, 0)) @ \
                         Matrix.Scale(delta_scale.y, 4, (0, 1, 0)) @ \
                         Matrix.Scale(delta_scale.z, 4, (0, 0, 1))
-        elif 'delta_matrix' in bone_pose:
-            delta_matrix = list_to_matrix(bone_pose['delta_matrix'])
         else:
             print(f"Warning: No valid pose data for {source_humanoid_bone}, skipping")
             continue

@@ -506,9 +506,14 @@ def add_pose_from_json(filename="pose_data.json", avatar_data_file="avatar_data.
         # 変換行列を構築
         bone_pose = pose_data[source_humanoid_bone]
 
-        # 個別フィールド（location, rotation, scale）を優先的に使用
-        # 古いJSONとの互換性のため、存在しない場合はdelta_matrixにフォールバック
-        if 'location' in bone_pose and 'rotation' in bone_pose and 'scale' in bone_pose:
+        # delta_matrixが存在する場合は優先的に使用（旧形式JSONとの互換性）
+        # delta_matrixがない場合のみlocation/rotation/scaleから再構築（新形式JSON）
+        if 'delta_matrix' in bone_pose:
+            # 旧形式: delta_matrixを直接使用（最も正確）
+            delta_matrix = list_to_matrix(bone_pose['delta_matrix'])
+        elif 'location' in bone_pose and 'rotation' in bone_pose and 'scale' in bone_pose:
+            # 新形式: location/rotation/scaleから行列を再構築
+            # rotation値は度で保存されているのでラジアンに変換
             delta_loc = Vector(bone_pose['location'])
             delta_rot = Euler([math.radians(x) for x in bone_pose['rotation']], 'XYZ')
             delta_scale = Vector(bone_pose['scale'])
@@ -518,9 +523,6 @@ def add_pose_from_json(filename="pose_data.json", avatar_data_file="avatar_data.
                         Matrix.Scale(delta_scale.x, 4, (1, 0, 0)) @ \
                         Matrix.Scale(delta_scale.y, 4, (0, 1, 0)) @ \
                         Matrix.Scale(delta_scale.z, 4, (0, 0, 1))
-        elif 'delta_matrix' in bone_pose:
-            # フォールバック: 古いJSONフォーマット（delta_matrixのみ）をサポート
-            delta_matrix = list_to_matrix(bone_pose['delta_matrix'])
         else:
             print(f"Warning: No valid pose data for {source_humanoid_bone}, skipping")
             continue
