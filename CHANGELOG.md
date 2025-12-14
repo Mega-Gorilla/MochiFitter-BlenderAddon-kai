@@ -10,19 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Unity側Blenderスクリプト (`retarget_script2_10.py`) をリポジトリに追加
   - GPL v3 ライセンスのため公開可能
-  - `location`, `rotation`, `scale` 優先 + `delta_matrix` フォールバック対応済み
   - パス: `MochFitter-unity-addon/BlenderTools/blender-4.0.2-windows-x64/dev/`
 
 ### Changed
-- `delta_matrix` をフォールバックとして再実装 - 後方互換性を強化
-  - `location`, `rotation`, `scale` フィールドを優先的に使用
-  - これらが存在しない古いJSONでは `delta_matrix` にフォールバック
-  - KeyError による読み込み失敗を防止
+- `delta_matrix` を最優先に変更 - 旧形式JSONとの完全互換性を実現
+  - `delta_matrix` が存在する場合はそれを直接使用（最も正確）
+  - `delta_matrix` がない新形式JSONでのみ `location`, `rotation`, `scale` から再構築
+  - 旧形式JSONでの rotation 単位問題（ラジアン vs 度）を回避
 
 ### Fixed
 - `BrokenProcessPool` エラーを修正 - Windows での安定性向上
   - `max_workers` を最大8に制限 (`min(8, os.cpu_count())`)
   - 32プロセス同時起動によるメモリ不足を回避
+- 旧形式posediff JSONでの座標破綻を修正
+  - 旧形式はrotationをラジアンで保存、新形式は度で保存
+  - `delta_matrix` 優先により旧形式JSONでの読み込み精度が向上
 
 ### Removed
 - 未使用の `matrix_to_list()` 関数を削除
