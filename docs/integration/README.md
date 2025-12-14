@@ -6,7 +6,7 @@ Blender アドオンと Unity アドオン間の連携に関するドキュメ�
 
 | ドキュメント | 説明 |
 |-------------|------|
-| [coordinate_systems.md](coordinate_systems.md) | 座標系とデータ変換（Blender Z-up ↔ Unity Y-up） |
+| [coordinate_systems.md](coordinate_systems.md) | 座標系とデータ変換（Blender Z-up <-> Unity Y-up） |
 | [data_flow.md](data_flow.md) | MochiFitter 全体のデータフロー |
 
 ## 概要

@@ -202,6 +202,11 @@
     │                           │   - world_matrix (単位行列)
     │                           │   - rbf_epsilon (RBFパラメータ)
     │                           │
+    │                           │   参考: 追加キー
+    │                           │   - kdtree_query_k (KDTree検索k値)
+    │                           │   - rbf_smoothing (スムージング)
+    │                           │   - enable_x_mirror (Xミラー有効)
+    │                           │
     └───────────────────────────┘
 ```
 
