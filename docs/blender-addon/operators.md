@@ -19,7 +19,7 @@ MochiFitter Blenderアドオンは以下のオペレーターを提供します�
 
 #### 出力
 - ファイル: `pose_basis_{source_avatar_name}.json`
-- 場所: Blendファイルと同じフォルダ
+- 場所: ユーザー指定（ExportHelperによるファイル選択ダイアログ）
 
 #### 内部処理
 ```python

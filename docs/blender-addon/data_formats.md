@@ -149,7 +149,7 @@ MochiFitterは以下のデータファイルを使用します：
 1. `delta_matrix` が存在 → 直接使用（最も正確）
 2. `delta_matrix` なし → `location/rotation/scale` から行列を再構築
 
-> **⚠️ 注意**: `delta_matrix`がなく、`rotation`がラジアン単位の旧形式JSONは
+> **注意**: `delta_matrix`がなく、`rotation`がラジアン単位の旧形式JSONは
 > 正しく読み込めません（新形式と誤認され度として解釈されるため）。
 > 旧形式JSONには必ず`delta_matrix`が含まれている必要があります。
 
