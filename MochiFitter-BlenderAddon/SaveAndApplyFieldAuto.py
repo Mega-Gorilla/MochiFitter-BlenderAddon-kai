@@ -4817,7 +4817,7 @@ def safe_rename(src: str, dst: str) -> tuple:
     except OSError as e:
         return False, "ERROR", f"リネームに失敗: {str(e)}"
 
-def reinstall_numpy_scipy_multithreaded():
+def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_version):
     """
     numpyとscipyをマルチスレッド対応版で強制再インストール
 
@@ -4829,19 +4829,19 @@ def reinstall_numpy_scipy_multithreaded():
 
     これにより pip 失敗時も既存の deps が保持される。
 
+    Parameters:
+        python_path (str): BlenderのPythonバイナリのパス（メインスレッドで事前取得）
+        numpy_version (str): NumPyのバージョン
+        scipy_version (str or None): SciPyのバージョン（未インストールの場合はNone）
+
     Returns:
         tuple: (success: bool, output: str, error: str)
     """
     try:
-        # 現在のnumpyとscipyのバージョンを取得
-        numpy_version = get_numpy_version()
-        scipy_version = get_scipy_version()
-
+        # パラメータの検証（bpy依存の値はメインスレッドで事前取得済み）
         if not numpy_version:
             return False, "", "numpy が見つかりません"
 
-        # BlenderのPythonパスを取得
-        python_path = get_blender_python_path()
         if not python_path or not os.path.exists(python_path):
             return False, "", f"Pythonパスが見つかりません: {python_path}"
 
@@ -5182,7 +5182,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
     def execute(self, context):
         import threading
 
-        # 現在のバージョンを取得
+        # 現在のバージョンを取得（メインスレッドで取得）
         self._numpy_version = get_numpy_version()
         self._scipy_version = get_scipy_version()
 
@@ -5190,10 +5190,21 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
             self.report({'ERROR'}, "numpy が見つかりません")
             return {'CANCELLED'}
 
-        # インストールを別スレッドで実行
+        # bpy依存の値をメインスレッドで事前取得（スレッド安全性のため）
+        python_path = get_blender_python_path()
+        numpy_version = self._numpy_version
+        scipy_version = self._scipy_version
+
+        if not python_path:
+            self.report({'ERROR'}, "Pythonパスが見つかりません")
+            return {'CANCELLED'}
+
+        # インストールを別スレッドで実行（純Pythonデータのみ渡す）
         def run_install():
             try:
-                self._result = reinstall_numpy_scipy_multithreaded()
+                self._result = reinstall_numpy_scipy_multithreaded(
+                    python_path, numpy_version, scipy_version
+                )
             except Exception as e:
                 self._result = (False, "", str(e))
 
