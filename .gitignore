@@ -43,6 +43,13 @@ wheels/
 *.blend2
 
 # -------------------------------------------
+# Addon Dependencies (installed by user)
+# -------------------------------------------
+MochiFitter-BlenderAddon/deps/
+MochiFitter-BlenderAddon/deps_new/
+MochiFitter-BlenderAddon/deps_old/
+
+# -------------------------------------------
 # IDE / Editor
 # -------------------------------------------
 .vscode/
