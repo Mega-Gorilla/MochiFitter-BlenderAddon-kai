@@ -29,6 +29,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - 未使用の `matrix_to_list()` 関数を削除
 
+## [0.2.1] - 2025-12-14
+
+### Added
+- NumPy/SciPy 再インストール機能の大幅な改善 (Issue #7)
+  - Microsoft Store 版 Blender (AppContainer サンドボックス) に完全対応
+  - `pip download` + 手動 wheel 展開方式を採用（`pip install --target` の問題を回避）
+  - `cmd /c mkdir` によるディレクトリ作成（`os.makedirs()` の `[WinError 183]` を回避）
+  - 安全なディレクトリ置換（`deps_new` → `deps` 方式で pip 失敗時も既存 deps を保持）
+- Modal Operator 化による非同期インストール
+  - インストール中に Blender が「応答なし」にならない
+  - ステータスバーにアニメーション付きメッセージを継続表示
+  - 完了時にポップアップ通知を表示
+- `safe_decode()` / `run_subprocess_safe()` ヘルパー関数
+  - Windows コンソールの UnicodeDecodeError を完全に回避
+  - UTF-8 → CP932 → 置換モードでフォールバック
+- GitHub Actions ワークフロー (`auto-version-bump.yml`)
+  - PR マージ時にパッチバージョンを自動インクリメント
+
+### Changed
+- バージョン取得を `importlib.metadata.version()` に変更
+  - モジュールロードを回避し、DLL ロック問題を防止
+- `__init__.py` から scipy の eager import/reload を削除
+  - ファイルロック防止のため、scipy は必要時にのみ遅延ロード
+- スレッド安全性の改善
+  - `bpy` 依存の値をメインスレッドで事前取得
+  - ワーカースレッドには純 Python データのみ渡す
+
+### Fixed
+- `[WinError 183]` - AppContainer での `os.makedirs()` 失敗を修正
+- `[WinError 17]` - pip のクロスドライブ移動エラーを修正
+- `UnicodeDecodeError` - subprocess の `_readerthread` エラーを修正
+- scipy DLL ロック問題 - eager import 削除により解消
+
 ## [0.1.0] - 2024-12-14
 
 ### Added
@@ -62,5 +95,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is forked from [MochiFitter](https://booth.pm/ja/items/7657840) version 2.5.0.
 
-[Unreleased]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.1.0...v0.2.1
 [0.1.0]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/releases/tag/v0.1.0
