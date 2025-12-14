@@ -4041,6 +4041,75 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
         return {'RUNNING_MODAL'}
 
 
+def safe_decode(data):
+    """
+    バイナリデータを安全にテキストにデコードする。
+    Windows のコンソール出力で発生する UnicodeDecodeError を回避するため、
+    UTF-8 → CP932 → 置換モード UTF-8 の順でフォールバックする。
+
+    Parameters:
+        data (bytes): デコードするバイナリデータ
+
+    Returns:
+        str: デコードされたテキスト
+    """
+    if not data:
+        return ""
+    # まず UTF-8 を試す
+    try:
+        return data.decode('utf-8')
+    except UnicodeDecodeError:
+        pass
+    # 次に CP932 (Shift-JIS) を試す
+    try:
+        return data.decode('cp932')
+    except UnicodeDecodeError:
+        pass
+    # 最後に置換モードで UTF-8
+    return data.decode('utf-8', errors='replace')
+
+
+def run_subprocess_safe(cmd, env=None, timeout=None, cwd=None):
+    """
+    UnicodeDecodeError を回避して subprocess を実行する。
+    Windows 環境でテキストモードを使わず、バイナリモードで実行して
+    手動でデコードする。
+
+    Parameters:
+        cmd (list): 実行するコマンド
+        env (dict, optional): 環境変数
+        timeout (int, optional): タイムアウト秒数
+        cwd (str, optional): 作業ディレクトリ
+
+    Returns:
+        tuple: (returncode, stdout_text, stderr_text)
+    """
+    creationflags = 0
+    if platform.system() == "Windows":
+        creationflags = subprocess.CREATE_NO_WINDOW
+
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        cwd=cwd,
+        creationflags=creationflags
+    )
+
+    try:
+        stdout_bytes, stderr_bytes = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout_bytes, stderr_bytes = process.communicate()
+        return -1, "", "Timeout"
+
+    stdout_text = safe_decode(stdout_bytes)
+    stderr_text = safe_decode(stderr_bytes)
+
+    return process.returncode, stdout_text, stderr_text
+
+
 def get_blender_python_path():
     """
     Blenderに含まれるPythonバイナリのパスを取得する
@@ -4130,38 +4199,26 @@ def get_blender_python_user_site_packages(python_path=None):
             
         # Pythonでユーザーサイトパッケージディレクトリを取得
         cmd = [python_path, '-c', 'import site; print(site.getusersitepackages())']
-        
+
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=10,
-                creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
-            )
-            
-            if result.returncode == 0:
-                user_site_path = result.stdout.strip()
+            returncode, stdout, stderr = run_subprocess_safe(cmd, timeout=10)
+
+            if returncode == 0:
+                user_site_path = stdout.strip()
                 if user_site_path and os.path.exists(user_site_path):
                     return user_site_path
         except:
             pass
-        
+
         # フォールバック: 手動でパスを構築
         if platform.system() == "Windows":
             # Pythonのバージョンを取得
             try:
                 version_cmd = [python_path, '-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")']
-                version_result = subprocess.run(
-                    version_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                
-                if version_result.returncode == 0:
-                    python_version = version_result.stdout.strip()
+                returncode, stdout, stderr = run_subprocess_safe(version_cmd, timeout=5)
+
+                if returncode == 0:
+                    python_version = stdout.strip()
                     # Windows: %APPDATA%\Python\PythonXX\site-packages
                     appdata = os.environ.get('APPDATA', '')
                     if appdata:
@@ -4674,41 +4731,120 @@ class CREATE_OT_FieldVisualization(bpy.types.Operator):
 
 # Numpy・Scipy再インストール関数
 def get_numpy_version():
-    """現在インストールされているnumpyのバージョンを取得"""
+    """
+    現在インストールされているnumpyのバージョンを取得
+
+    importlib.metadata を使用してモジュールをロードせずにバージョンを取得する。
+    これによりファイルロックを防止する。
+    """
     try:
-        import numpy as np
-        return np.__version__
-    except ImportError:
+        from importlib.metadata import version
+        return version("numpy")
+    except Exception:
         return None
 
 def get_scipy_version():
-    """現在インストールされているscipyのバージョンを取得"""
+    """
+    現在インストールされているscipyのバージョンを取得
+
+    importlib.metadata を使用してモジュールをロードせずにバージョンを取得する。
+    これによりファイルロックを防止する。
+    """
     try:
-        import scipy
-        return scipy.__version__
-    except ImportError:
+        from importlib.metadata import version
+        return version("scipy")
+    except Exception:
         return None
 
-def reinstall_numpy_scipy_multithreaded():
+def _rmtree_onerror(func, path, exc_info):
+    """
+    shutil.rmtree の onerror ハンドラー
+
+    Windows で read-only 属性のファイルを削除できるようにする。
+    """
+    import stat
+    # read-only 属性を解除して再試行
+    if not os.access(path, os.W_OK):
+        os.chmod(path, stat.S_IWUSR)
+        func(path)
+    else:
+        raise exc_info[1]
+
+def safe_rmtree(path: str) -> tuple:
+    """
+    安全にディレクトリを削除する
+
+    Args:
+        path: 削除するディレクトリのパス
+
+    Returns:
+        tuple: (success: bool, error_type: str, error_message: str)
+            error_type: "LOCK", "ERROR", "" (成功時)
+    """
+    if not os.path.exists(path):
+        return True, "", ""
+
+    try:
+        shutil.rmtree(path, onerror=_rmtree_onerror)
+        return True, "", ""
+    except PermissionError as e:
+        return False, "LOCK", f"ファイルがロックされています。Blenderを再起動してから再実行してください: {e}"
+    except OSError as e:
+        return False, "ERROR", f"ディレクトリの削除に失敗: {str(e)}"
+
+def safe_rename(src: str, dst: str) -> tuple:
+    """
+    安全にディレクトリをリネームする
+
+    Args:
+        src: 元のパス
+        dst: 新しいパス
+
+    Returns:
+        tuple: (success: bool, error_type: str, error_message: str)
+    """
+    try:
+        if os.path.exists(dst):
+            # 既存の dst を削除
+            success, err_type, err_msg = safe_rmtree(dst)
+            if not success:
+                return False, err_type, err_msg
+
+        os.rename(src, dst)
+        return True, "", ""
+    except PermissionError as e:
+        return False, "LOCK", f"ファイルがロックされています。Blenderを再起動してから再実行してください: {e}"
+    except OSError as e:
+        return False, "ERROR", f"リネームに失敗: {str(e)}"
+
+def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_version):
     """
     numpyとscipyをマルチスレッド対応版で強制再インストール
-    
+
+    安全なインストール方式:
+    1. 一時ディレクトリ (deps_new) にインストール
+    2. 成功したら既存の deps を deps_old にリネーム
+    3. deps_new を deps にリネーム
+    4. deps_old を削除
+
+    これにより pip 失敗時も既存の deps が保持される。
+
+    Parameters:
+        python_path (str): BlenderのPythonバイナリのパス（メインスレッドで事前取得）
+        numpy_version (str): NumPyのバージョン
+        scipy_version (str or None): SciPyのバージョン（未インストールの場合はNone）
+
     Returns:
         tuple: (success: bool, output: str, error: str)
     """
     try:
-        # 現在のnumpyとscipyのバージョンを取得
-        numpy_version = get_numpy_version()
-        scipy_version = get_scipy_version()
-        
+        # パラメータの検証（bpy依存の値はメインスレッドで事前取得済み）
         if not numpy_version:
             return False, "", "numpy が見つかりません"
-        
-        # BlenderのPythonパスを取得
-        python_path = get_blender_python_path()
+
         if not python_path or not os.path.exists(python_path):
             return False, "", f"Pythonパスが見つかりません: {python_path}"
-        
+
         # インストールするパッケージリストを作成
         packages = [f"numpy=={numpy_version}"]
         if scipy_version:
@@ -4716,12 +4852,12 @@ def reinstall_numpy_scipy_multithreaded():
         else:
             # scipyがインストールされていない場合は最新版をインストール
             packages.append("scipy")
-        
-        libs_path = os.path.join(os.path.dirname(__file__), 'deps')
-        
-        # pip install --force-reinstall --user コマンドを実行
-        cmd = [python_path, "-m", "pip", "install", "--target", libs_path, "--force-reinstall"] + packages
-        
+
+        addon_dir = os.path.dirname(__file__)
+        deps_path = os.path.join(addon_dir, 'deps')
+        deps_new_path = os.path.join(addon_dir, 'deps_new')
+        deps_old_path = os.path.join(addon_dir, 'deps_old')
+
         print(f"\n{'='*60}")
         print(f"NumPy・SciPy マルチスレッド対応再インストール開始")
         print(f"{'='*60}")
@@ -4730,90 +4866,381 @@ def reinstall_numpy_scipy_multithreaded():
             print(f"SciPy バージョン: {scipy_version}")
         else:
             print("SciPy: インストールされていません（新規インストールします）")
+
+        # 一時ディレクトリをクリーンアップ（前回の失敗時のゴミを削除）
+        # 注意: Windows ではファイルシステムの状態が遅延することがあるため
+        # os.path.exists() が False でも実際には存在する場合がある
+        # そのため、存在チェックをせずに常に削除を試みる
+        for tmp_path in [deps_new_path, deps_old_path]:
+            print(f"一時パスをクリーンアップ中: {tmp_path}")
+            try:
+                # まずファイルとして削除を試みる
+                try:
+                    os.remove(tmp_path)
+                    print(f"  ファイルを削除しました")
+                    continue
+                except IsADirectoryError:
+                    # ディレクトリの場合は rmtree へ
+                    pass
+                except FileNotFoundError:
+                    # 存在しない場合はスキップ
+                    print(f"  存在しません（スキップ）")
+                    continue
+                except PermissionError:
+                    # ディレクトリの可能性があるので rmtree へ
+                    pass
+
+                # ディレクトリとして削除を試みる
+                try:
+                    shutil.rmtree(tmp_path, onerror=_rmtree_onerror)
+                    print(f"  ディレクトリを削除しました")
+                except FileNotFoundError:
+                    print(f"  存在しません（スキップ）")
+                except PermissionError as e:
+                    err_msg = f"ファイルがロックされています。Blenderを再起動してから再実行してください: {e}"
+                    print(f"  {err_msg}")
+                    return False, "", err_msg
+                except OSError as e:
+                    err_msg = f"削除に失敗: {e}"
+                    print(f"  {err_msg}")
+                    return False, "", err_msg
+
+            except Exception as e:
+                err_msg = f"予期しないエラー: {e}"
+                print(f"  {err_msg}")
+                return False, "", err_msg
+
+        # 一時ディレクトリを作成
+        # 注意: Microsoft Store版Blenderではos.makedirs()が失敗するため、
+        # cmd /c mkdir を優先的に使用する
+        print(f"一時ディレクトリを作成中: {deps_new_path}")
+
+        def create_directory_windows(path: str) -> tuple:
+            """
+            Windowsでディレクトリを作成する。
+            Store版Blenderのサンドボックス環境に対応するため、
+            cmd /c mkdir を優先的に使用する。
+            """
+            # 方法1: cmd /c mkdir（Store版Blender対応）
+            try:
+                # 出力は不要なので DEVNULL を使用（UnicodeDecodeError 回避）
+                result = subprocess.run(
+                    ['cmd', '/c', 'mkdir', path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    shell=False
+                )
+                if result.returncode == 0:
+                    return True, "cmd"
+                # 既に存在する場合もエラーコード1が返る
+                if os.path.isdir(path):
+                    return True, "cmd (already exists)"
+            except Exception as e:
+                print(f"  cmd /c mkdir 例外: {e}")
+
+            # 方法2: os.makedirs（通常環境用フォールバック）
+            try:
+                os.makedirs(path, exist_ok=True)
+                return True, "os.makedirs"
+            except OSError as e:
+                print(f"  os.makedirs 失敗: {e}")
+
+            return False, ""
+
+        success, method = create_directory_windows(deps_new_path)
+        if success:
+            print(f"一時ディレクトリを作成しました（{method}）")
+        else:
+            return False, "", f"一時ディレクトリの作成に失敗: {deps_new_path}"
+
+        # pip download + 手動展開方式
+        # Microsoft Store版Blenderでは pip install --target が
+        # クロスドライブ移動エラー(WinError 17)を起こすため、
+        # wheel をダウンロードして手動で展開する
+        import zipfile
+
+        wheels_path = os.path.join(deps_new_path, '_wheels')
+        success, method = create_directory_windows(wheels_path)
+        if not success:
+            return False, "", f"wheelダウンロード用ディレクトリの作成に失敗: {wheels_path}"
+        print(f"wheelダウンロード用ディレクトリを作成しました: {wheels_path}")
+
+        # Step 1: pip download で wheel ファイルをダウンロード
+        cmd = [python_path, "-m", "pip", "download",
+               "--no-cache-dir",
+               "--only-binary=:all:",  # ソースビルドを避ける
+               "--dest", wheels_path] + packages
         print(f"実行コマンド: {' '.join(cmd)}")
-        
-        # 環境変数を設定
+
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
         env['PYTHONLEGACYWINDOWSSTDIO'] = '1'
-        
-        # コマンドを実行
-        result = subprocess.run(
+        env['PIP_NO_CACHE_DIR'] = '1'
+
+        # subprocess.run() の capture_output=True は Windows で UnicodeDecodeError を
+        # 起こすことがあるため、バイナリモードで実行して手動でデコード
+        process = subprocess.Popen(
             cmd,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=env
         )
-        
+        stdout_bytes, stderr_bytes = process.communicate()
+
+        # モジュールレベルの safe_decode() を使用してデコード
+        stdout_text = safe_decode(stdout_bytes)
+        stderr_text = safe_decode(stderr_bytes)
+
+        class Result:
+            returncode = process.returncode
+            stdout = stdout_text
+            stderr = stderr_text
+
+        result = Result()
+
         print(f"実行結果 (return code: {result.returncode}):")
         print(f"出力:\n{result.stdout}")
-        
+
         if result.stderr:
             print(f"エラー出力:\n{result.stderr}")
-        
-        success = result.returncode == 0
-        return success, result.stdout, result.stderr
-        
+
+        if result.returncode != 0:
+            print("pip download が失敗しました。既存の deps は保持されます。")
+            safe_rmtree(deps_new_path)
+            return False, result.stdout, result.stderr
+
+        # Step 2: wheel ファイルを展開
+        # zipfile.extractall() は内部で os.makedirs() を使用するため、
+        # Microsoft Store版Blenderで WinError 183 が発生する。
+        # そのため、ファイルを1つずつ展開し、ディレクトリ作成には
+        # cmd /c mkdir を使用する。
+        print("wheelファイルを展開中...")
+        wheel_files = [f for f in os.listdir(wheels_path) if f.endswith('.whl')]
+
+        if not wheel_files:
+            print("エラー: wheelファイルが見つかりません")
+            safe_rmtree(deps_new_path)
+            return False, result.stdout, "wheelファイルが見つかりません"
+
+        # 作成済みディレクトリを追跡（重複作成を避ける）
+        created_dirs = set()
+
+        for wheel_file in wheel_files:
+            wheel_path = os.path.join(wheels_path, wheel_file)
+            print(f"  展開中: {wheel_file}")
+            try:
+                with zipfile.ZipFile(wheel_path, 'r') as zip_ref:
+                    for member in zip_ref.namelist():
+                        # 展開先パス
+                        target_path = os.path.join(deps_new_path, member)
+
+                        # ディレクトリエントリの場合
+                        if member.endswith('/'):
+                            if target_path not in created_dirs:
+                                create_directory_windows(target_path)
+                                created_dirs.add(target_path)
+                            continue
+
+                        # ファイルの場合：親ディレクトリを作成
+                        parent_dir = os.path.dirname(target_path)
+                        if parent_dir and parent_dir not in created_dirs:
+                            create_directory_windows(parent_dir)
+                            created_dirs.add(parent_dir)
+
+                        # ファイルを展開
+                        with zip_ref.open(member) as source:
+                            with open(target_path, 'wb') as target:
+                                target.write(source.read())
+
+            except Exception as e:
+                print(f"  展開エラー: {e}")
+                import traceback
+                traceback.print_exc()
+                safe_rmtree(deps_new_path)
+                return False, result.stdout, f"wheel展開エラー: {e}"
+
+        # Step 3: wheels ディレクトリを削除
+        print("wheelファイルをクリーンアップ中...")
+        safe_rmtree(wheels_path)
+
+        # pip 成功: ディレクトリを置き換え
+        print("インストール成功。ディレクトリを置き換え中...")
+
+        # 既存の deps があれば deps_old にリネーム
+        if os.path.exists(deps_path):
+            print(f"既存の deps を deps_old に移動中...")
+            success, err_type, err_msg = safe_rename(deps_path, deps_old_path)
+            if not success:
+                print(f"deps のリネームに失敗: {err_msg}")
+                # 失敗しても新しい deps_new は残す（手動復旧用）
+                return False, result.stdout, err_msg
+
+        # deps_new を deps にリネーム
+        print(f"deps_new を deps に移動中...")
+        success, err_type, err_msg = safe_rename(deps_new_path, deps_path)
+        if not success:
+            print(f"deps_new のリネームに失敗: {err_msg}")
+            # deps_old を deps に戻す
+            if os.path.exists(deps_old_path):
+                safe_rename(deps_old_path, deps_path)
+            return False, result.stdout, err_msg
+
+        # deps_old を削除（失敗しても警告のみ）
+        if os.path.exists(deps_old_path):
+            print(f"古い deps_old を削除中...")
+            success, _, err_msg = safe_rmtree(deps_old_path)
+            if not success:
+                print(f"警告: deps_old の削除に失敗しました（手動で削除してください）: {err_msg}")
+
+        print("ディレクトリの置き換え完了")
+        return True, result.stdout, result.stderr
+
     except Exception as e:
         error_msg = f"NumPy・SciPy再インストール中にエラーが発生しました: {str(e)}"
         print(error_msg)
+        import traceback
+        traceback.print_exc()
         return False, "", error_msg
 
 
-# numpy・scipy再インストールオペレーター
+# numpy・scipy再インストールオペレーター（Modal版 - UIフリーズ回避）
 class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
     bl_idname = "rbf.reinstall_numpy_scipy_multithreaded"
     bl_label = "Reinstall NumPy & SciPy (Multithreaded)"
     bl_description = "numpyとscipyをマルチスレッド対応版で強制再インストール"
-    
-    def execute(self, context):
-        try:
-            # 現在のバージョンを取得
-            numpy_version = get_numpy_version()
-            scipy_version = get_scipy_version()
-            
-            if not numpy_version:
-                self.report({'ERROR'}, "numpy が見つかりません")
-                return {'CANCELLED'}
-            
-            # 再インストールを実行
-            success, output, error = reinstall_numpy_scipy_multithreaded()
-            
-            if success:
-                packages_info = f"NumPy {numpy_version}"
-                if scipy_version:
-                    packages_info += f", SciPy {scipy_version}"
+
+    # インストールスレッドの状態を保持
+    _timer = None
+    _thread = None
+    _result = None  # (success, output, error)
+    _numpy_version = None
+    _scipy_version = None
+    _dot_count = 0  # アニメーション用カウンター
+
+    def modal(self, context, event):
+        if event.type == 'TIMER':
+            # ステータスバーのアニメーション更新
+            self._dot_count = (self._dot_count + 1) % 4
+            dots = "." * (self._dot_count + 1)
+            context.workspace.status_text_set(f"NumPy・SciPy インストール中{dots}")
+
+            # スレッドの完了をチェック
+            if self._thread is not None and not self._thread.is_alive():
+                # タイマーを停止
+                context.window_manager.event_timer_remove(self._timer)
+                self._timer = None
+
+                # ステータスバーをクリア
+                context.workspace.status_text_set(None)
+
+                # 結果を取得
+                success, output, error = self._result if self._result else (False, "", "Unknown error")
+
+                if success:
+                    packages_info = f"NumPy {self._numpy_version}"
+                    if self._scipy_version:
+                        packages_info += f", SciPy {self._scipy_version}"
+                    else:
+                        packages_info += ", SciPy (新規インストール)"
+
+                    self.report({'WARNING'}, f"{packages_info} を再インストールしました。Blenderを再起動してください")
+                    print(f"NumPy・SciPy再インストール成功。Blenderを再起動してください。")
+
+                    # 成功ポップアップを表示
+                    def draw_success_popup(self, context):
+                        self.layout.label(text="NumPy・SciPy のインストールが完了しました")
+                        self.layout.label(text="")
+                        self.layout.label(text="Blender を再起動してください", icon='ERROR')
+
+                    context.window_manager.popup_menu(draw_success_popup, title="インストール完了", icon='CHECKMARK')
                 else:
-                    packages_info += ", SciPy (新規インストール)"
-                
-                self.report({'INFO'}, f"{packages_info} をマルチスレッド対応版で再インストールしました")
-                print(f"NumPy・SciPy再インストール成功")
-            else:
-                error_msg = f"NumPy・SciPy再インストールに失敗しました"
-                if error:
-                    error_msg += f": {error}"
-                self.report({'ERROR'}, error_msg)
-            
-            return {'FINISHED'}
-        
-        except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
-            print(error_msg)
-            self.report({'ERROR'}, error_msg)
+                    if error:
+                        self.report({'ERROR'}, error)
+                    else:
+                        self.report({'ERROR'}, "NumPy・SciPy再インストールに失敗しました")
+
+                    # エラーポップアップを表示
+                    def draw_error_popup(self, context):
+                        self.layout.label(text="インストールに失敗しました")
+                        self.layout.label(text="")
+                        if error:
+                            # エラーメッセージを短く表示
+                            short_error = error[:80] + "..." if len(error) > 80 else error
+                            self.layout.label(text=short_error)
+                        self.layout.label(text="詳細はコンソールを確認してください", icon='INFO')
+
+                    context.window_manager.popup_menu(draw_error_popup, title="インストールエラー", icon='ERROR')
+
+                # UIを更新
+                for area in context.screen.areas:
+                    area.tag_redraw()
+
+                return {'FINISHED'}
+
+        return {'PASS_THROUGH'}
+
+    def execute(self, context):
+        import threading
+
+        # 現在のバージョンを取得（メインスレッドで取得）
+        self._numpy_version = get_numpy_version()
+        self._scipy_version = get_scipy_version()
+
+        if not self._numpy_version:
+            self.report({'ERROR'}, "numpy が見つかりません")
             return {'CANCELLED'}
-    
+
+        # bpy依存の値をメインスレッドで事前取得（スレッド安全性のため）
+        python_path = get_blender_python_path()
+        numpy_version = self._numpy_version
+        scipy_version = self._scipy_version
+
+        if not python_path:
+            self.report({'ERROR'}, "Pythonパスが見つかりません")
+            return {'CANCELLED'}
+
+        # インストールを別スレッドで実行（純Pythonデータのみ渡す）
+        def run_install():
+            try:
+                self._result = reinstall_numpy_scipy_multithreaded(
+                    python_path, numpy_version, scipy_version
+                )
+            except Exception as e:
+                self._result = (False, "", str(e))
+
+        self._thread = threading.Thread(target=run_install)
+        self._thread.start()
+
+        # タイマーを設定（0.5秒ごとにチェック）
+        self._timer = context.window_manager.event_timer_add(0.5, window=context.window)
+        context.window_manager.modal_handler_add(self)
+
+        # ステータスバーに表示開始
+        self._dot_count = 0
+        context.workspace.status_text_set("NumPy・SciPy インストール中.")
+
+        self.report({'INFO'}, "インストール中... (バックグラウンドで実行中)")
+
+        return {'RUNNING_MODAL'}
+
     def invoke(self, context, event):
         # 実行前に確認ダイアログを表示
         numpy_version = get_numpy_version()
         scipy_version = get_scipy_version()
-        
+
         if numpy_version:
             return context.window_manager.invoke_confirm(self, event)
         else:
             self.report({'ERROR'}, "numpy が見つかりません")
             return {'CANCELLED'}
+
+    def cancel(self, context):
+        # キャンセル時にタイマーをクリーンアップ
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        # ステータスバーをクリア
+        context.workspace.status_text_set(None)
 
 
 # デバッグ用オペレーター：外部Pythonでscipyテスト
@@ -4903,22 +5330,14 @@ print("\\nTest completed")
             print(f"外部Pythonテスト実行")
             print(f"{'='*60}")
             print(f"実行コマンド: {' '.join(cmd)}")
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',  # 文字エンコーディングエラーを無視
-                cwd=scene_folder,
-                env=env
-            )
-            
-            print(f"実行結果 (return code: {result.returncode}):")
-            print(f"出力:\n{result.stdout}")
-            
-            if result.stderr:
-                print(f"エラー出力:\n{result.stderr}")
+
+            returncode, stdout, stderr = run_subprocess_safe(cmd, env=env, cwd=scene_folder)
+
+            print(f"実行結果 (return code: {returncode}):")
+            print(f"出力:\n{stdout}")
+
+            if stderr:
+                print(f"エラー出力:\n{stderr}")
             
             # テストスクリプトを削除
             try:
@@ -4926,7 +5345,7 @@ print("\\nTest completed")
             except:
                 pass
             
-            if result.returncode == 0:
+            if returncode == 0:
                 self.report({'INFO'}, "外部Pythonテストが成功しました")
             else:
                 self.report({'WARNING'}, "外部Pythonテストで問題が検出されました")

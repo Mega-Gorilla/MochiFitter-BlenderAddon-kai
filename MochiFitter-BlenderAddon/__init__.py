@@ -6,7 +6,7 @@ MochiFitter - Advanced Avatar Outfit Retargeting System for Blender
 bl_info = {
     "name": "MochiFitter-Kai",
     "author": "Community Fork (Original: MochiFitter Development Team)",
-    "version": (0, 1, 0),
+    "version": (0, 2, 0),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > MochiFitter",
     "description": "Community-optimized fork of MochiFitter - Avatar Outfit Retargeting System using RBF interpolation",
@@ -21,19 +21,11 @@ import sys
 import os
 import importlib
 
+# deps ディレクトリをパスに追加（scipy等の依存関係用）
+# 注意: scipy の import は遅延実行する（ファイルロック防止のため）
 libs_path = os.path.join(os.path.dirname(__file__), 'deps')
 if libs_path not in sys.path:
     sys.path.append(libs_path)
-
-for module in ["scipy"]:
-    print("import", module)
-    print("libs_path", libs_path)
-    try:
-        # 追加: モジュールをリロードしてからインポート
-        importlib.reload(importlib.import_module(module))
-        print(f"成功: {module} がインポートされました")
-    except ImportError:
-        print("import error", module)
 
 # アドオンのディレクトリパスを取得
 addon_dir = os.path.dirname(__file__)
