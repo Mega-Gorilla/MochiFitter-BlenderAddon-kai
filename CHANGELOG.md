@@ -8,9 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Unity側Blenderスクリプト (`retarget_script2_10.py`) をリポジトリに追加
-  - GPL v3 ライセンスのため公開可能
-  - パス: `MochFitter-unity-addon/BlenderTools/blender-4.0.2-windows-x64/dev/`
 - `matrix_to_list()` 関数を追加（JSON保存用）
 
 ### Changed
