@@ -4811,17 +4811,43 @@ def reinstall_numpy_scipy_multithreaded():
             print("SciPy: インストールされていません（新規インストールします）")
 
         # 一時ディレクトリをクリーンアップ（前回の失敗時のゴミを削除）
+        # 注意: Windows ではファイルシステムの状態が遅延することがあるため
+        # os.path.exists() が False でも実際には存在する場合がある
         for tmp_path in [deps_new_path, deps_old_path]:
-            if os.path.exists(tmp_path):
-                print(f"一時ディレクトリを削除中: {tmp_path}")
-                success, err_type, err_msg = safe_rmtree(tmp_path)
-                if not success:
-                    print(f"一時ディレクトリの削除に失敗: {err_msg}")
-                    return False, "", err_msg
+            print(f"一時パスをクリーンアップ中: {tmp_path}")
+            try:
+                if os.path.isfile(tmp_path):
+                    # ファイルとして存在する場合は削除
+                    os.remove(tmp_path)
+                    print(f"  ファイルを削除しました")
+                elif os.path.isdir(tmp_path):
+                    # ディレクトリとして存在する場合は rmtree
+                    success, err_type, err_msg = safe_rmtree(tmp_path)
+                    if not success:
+                        print(f"  削除に失敗: {err_msg}")
+                        return False, "", err_msg
+                    print(f"  ディレクトリを削除しました")
+                else:
+                    print(f"  存在しません（スキップ）")
+            except PermissionError as e:
+                err_msg = f"ファイルがロックされています。Blenderを再起動してから再実行してください: {e}"
+                print(f"  {err_msg}")
+                return False, "", err_msg
+            except OSError as e:
+                err_msg = f"削除に失敗: {e}"
+                print(f"  {err_msg}")
+                return False, "", err_msg
 
         # 一時ディレクトリを作成
-        os.makedirs(deps_new_path, exist_ok=True)
-        print(f"一時ディレクトリを作成: {deps_new_path}")
+        print(f"一時ディレクトリを作成中: {deps_new_path}")
+        try:
+            os.makedirs(deps_new_path, exist_ok=True)
+            print(f"一時ディレクトリを作成しました")
+        except OSError as e:
+            # それでも失敗する場合は詳細を出力
+            print(f"makedirs 失敗: {e}")
+            print(f"  パス存在チェック: os.path.exists={os.path.exists(deps_new_path)}, isdir={os.path.isdir(deps_new_path)}, isfile={os.path.isfile(deps_new_path)}")
+            return False, "", f"一時ディレクトリの作成に失敗: {e}"
 
         # pip install を一時ディレクトリに実行
         cmd = [python_path, "-m", "pip", "install", "--target", deps_new_path] + packages
