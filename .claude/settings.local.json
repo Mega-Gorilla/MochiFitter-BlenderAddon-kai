@@ -28,7 +28,11 @@
       "Bash(dir:*)",
       "Bash(findstr:*)",
       "Bash(powershell:*)",
-      "Bash(gh issue reopen:*)"
+      "Bash(gh issue reopen:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh api:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(git restore:*)"
     ]
   }
 }

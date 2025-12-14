@@ -4869,7 +4869,7 @@ def reinstall_numpy_scipy_multithreaded():
             print(f"  [DEBUG] listdir 失敗: {list_err}")
 
         # リトライ付きでディレクトリ作成を試みる
-        max_retries = 3
+        max_retries = 4
         retry_delay = 0.5  # 500ms
         last_error = None
         actual_deps_new_path = deps_new_path
@@ -4884,6 +4884,7 @@ def reinstall_numpy_scipy_multithreaded():
             print(f"  [DEBUG] deps_new_path = {actual_deps_new_path}")
             print(f"  [DEBUG] os.path.exists() = {os.path.exists(actual_deps_new_path)}")
 
+            # 方法1: os.makedirs
             try:
                 os.makedirs(actual_deps_new_path, exist_ok=True)
                 print(f"一時ディレクトリを作成しました: {actual_deps_new_path}")
@@ -4893,12 +4894,50 @@ def reinstall_numpy_scipy_multithreaded():
                 print(f"  makedirs 失敗 (試行 {attempt + 1}): {e}")
                 print(f"  エラーコード: errno={e.errno}, winerror={getattr(e, 'winerror', 'N/A')}")
 
-                # 最後のリトライ前に代替パスを試す
-                if attempt == max_retries - 2:
-                    actual_deps_new_path = os.path.join(addon_dir, f'deps_new_{int(time.time())}')
-                    print(f"  代替パスに切り替え: {actual_deps_new_path}")
+            # 方法2: pathlib を試す
+            try:
+                from pathlib import Path
+                Path(actual_deps_new_path).mkdir(parents=True, exist_ok=True)
+                print(f"  pathlib.mkdir 成功!")
+                break
+            except OSError as e:
+                print(f"  pathlib.mkdir も失敗: {e}")
+
+            # 方法3: Windows cmd /c mkdir を試す
+            try:
+                result = subprocess.run(
+                    ['cmd', '/c', 'mkdir', actual_deps_new_path],
+                    capture_output=True,
+                    text=True,
+                    shell=False
+                )
+                if result.returncode == 0:
+                    print(f"  cmd /c mkdir 成功!")
+                    break
+                else:
+                    print(f"  cmd /c mkdir 失敗: {result.stderr}")
+            except Exception as cmd_err:
+                print(f"  cmd /c mkdir 例外: {cmd_err}")
+
+            # 最後のリトライ前に代替パスを試す
+            if attempt == max_retries - 2:
+                actual_deps_new_path = os.path.join(addon_dir, f'deps_new_{int(time.time())}')
+                print(f"  代替パスに切り替え: {actual_deps_new_path}")
         else:
-            # 全リトライ失敗
+            # 全リトライ失敗 - 追加診断を出力
+            print(f"\n  [DIAG] === 追加診断情報 ===")
+            print(f"  [DIAG] addon_dir exists: {os.path.exists(addon_dir)}")
+            print(f"  [DIAG] addon_dir is_dir: {os.path.isdir(addon_dir)}")
+            print(f"  [DIAG] addon_dir writable: {os.access(addon_dir, os.W_OK)}")
+            try:
+                # 親ディレクトリ内に一時ファイルを作成してみる
+                test_file = os.path.join(addon_dir, f'_test_{int(time.time())}.tmp')
+                with open(test_file, 'w') as f:
+                    f.write('test')
+                os.remove(test_file)
+                print(f"  [DIAG] 一時ファイル作成テスト: 成功")
+            except Exception as test_err:
+                print(f"  [DIAG] 一時ファイル作成テスト: 失敗 - {test_err}")
             return False, "", f"一時ディレクトリの作成に失敗（{max_retries}回試行）: {last_error}"
 
         # actual_deps_new_path が変わった場合、deps_new_path を更新
