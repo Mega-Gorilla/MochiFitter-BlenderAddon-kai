@@ -4895,34 +4895,30 @@ def reinstall_numpy_scipy_multithreaded():
         else:
             return False, "", f"一時ディレクトリの作成に失敗: {deps_new_path}"
 
-        # pip用の一時ディレクトリを作成（同じドライブに配置してWinError 17を回避）
-        pip_tmp_path = os.path.join(deps_new_path, '_pip_tmp')
-        success, method = create_directory_windows(pip_tmp_path)
-        if success:
-            print(f"pip一時ディレクトリを作成しました: {pip_tmp_path}")
+        # pip download + 手動展開方式
+        # Microsoft Store版Blenderでは pip install --target が
+        # クロスドライブ移動エラー(WinError 17)を起こすため、
+        # wheel をダウンロードして手動で展開する
+        import zipfile
 
-        # pip install を一時ディレクトリに実行
-        # --no-cache-dir: キャッシュを使わない（移動問題を軽減）
-        cmd = [python_path, "-m", "pip", "install",
+        wheels_path = os.path.join(deps_new_path, '_wheels')
+        success, method = create_directory_windows(wheels_path)
+        if not success:
+            return False, "", f"wheelダウンロード用ディレクトリの作成に失敗: {wheels_path}"
+        print(f"wheelダウンロード用ディレクトリを作成しました: {wheels_path}")
+
+        # Step 1: pip download で wheel ファイルをダウンロード
+        cmd = [python_path, "-m", "pip", "download",
                "--no-cache-dir",
-               "--target", deps_new_path] + packages
+               "--only-binary=:all:",  # ソースビルドを避ける
+               "--dest", wheels_path] + packages
         print(f"実行コマンド: {' '.join(cmd)}")
 
-        # 環境変数を設定
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
         env['PYTHONLEGACYWINDOWSSTDIO'] = '1'
-
-        # pip の一時ディレクトリを deps_new と同じ場所に設定
-        # これにより WinError 17（クロスドライブ移動エラー）を回避
-        # Microsoft Store版Blenderのサンドボックス環境で必要
-        env['TMPDIR'] = pip_tmp_path
-        env['TEMP'] = pip_tmp_path
-        env['TMP'] = pip_tmp_path
         env['PIP_NO_CACHE_DIR'] = '1'
-        print(f"pip一時ディレクトリを設定: {pip_tmp_path}")
 
-        # コマンドを実行
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -4938,18 +4934,37 @@ def reinstall_numpy_scipy_multithreaded():
         if result.stderr:
             print(f"エラー出力:\n{result.stderr}")
 
-        # pip が失敗した場合、一時ディレクトリを削除して終了
         if result.returncode != 0:
-            print("pip install が失敗しました。既存の deps は保持されます。")
+            print("pip download が失敗しました。既存の deps は保持されます。")
             safe_rmtree(deps_new_path)
             return False, result.stdout, result.stderr
 
-        # pip 成功: ディレクトリを置き換え
-        print("pip install 成功。ディレクトリを置き換え中...")
+        # Step 2: wheel ファイルを展開
+        print("wheelファイルを展開中...")
+        wheel_files = [f for f in os.listdir(wheels_path) if f.endswith('.whl')]
 
-        # pip用一時ディレクトリを削除
-        if os.path.exists(pip_tmp_path):
-            safe_rmtree(pip_tmp_path)
+        if not wheel_files:
+            print("エラー: wheelファイルが見つかりません")
+            safe_rmtree(deps_new_path)
+            return False, result.stdout, "wheelファイルが見つかりません"
+
+        for wheel_file in wheel_files:
+            wheel_path = os.path.join(wheels_path, wheel_file)
+            print(f"  展開中: {wheel_file}")
+            try:
+                with zipfile.ZipFile(wheel_path, 'r') as zip_ref:
+                    zip_ref.extractall(deps_new_path)
+            except Exception as e:
+                print(f"  展開エラー: {e}")
+                safe_rmtree(deps_new_path)
+                return False, result.stdout, f"wheel展開エラー: {e}"
+
+        # Step 3: wheels ディレクトリを削除
+        print("wheelファイルをクリーンアップ中...")
+        safe_rmtree(wheels_path)
+
+        # pip 成功: ディレクトリを置き換え
+        print("インストール成功。ディレクトリを置き換え中...")
 
         # 既存の deps があれば deps_old にリネーム
         if os.path.exists(deps_path):
