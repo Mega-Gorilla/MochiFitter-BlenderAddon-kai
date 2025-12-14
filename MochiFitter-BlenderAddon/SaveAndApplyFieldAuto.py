@@ -4674,20 +4674,61 @@ class CREATE_OT_FieldVisualization(bpy.types.Operator):
 
 # Numpy・Scipy再インストール関数
 def get_numpy_version():
-    """現在インストールされているnumpyのバージョンを取得"""
+    """
+    現在インストールされているnumpyのバージョンを取得
+
+    importlib.metadata を使用してモジュールをロードせずにバージョンを取得する。
+    これによりファイルロックを防止する。
+    """
     try:
-        import numpy as np
-        return np.__version__
-    except ImportError:
+        from importlib.metadata import version
+        return version("numpy")
+    except Exception:
         return None
 
 def get_scipy_version():
-    """現在インストールされているscipyのバージョンを取得"""
+    """
+    現在インストールされているscipyのバージョンを取得
+
+    importlib.metadata を使用してモジュールをロードせずにバージョンを取得する。
+    これによりファイルロックを防止する。
+    """
     try:
-        import scipy
-        return scipy.__version__
-    except ImportError:
+        from importlib.metadata import version
+        return version("scipy")
+    except Exception:
         return None
+
+def clean_deps_directory(deps_path: str) -> tuple:
+    """
+    deps ディレクトリをクリーンアップ
+
+    pip install --target の前に既存ファイルを削除する。
+    ファイルがロックされている場合（scipy がロード済みの場合など）は
+    PermissionError をキャッチしてユーザーに再起動を促す。
+
+    Args:
+        deps_path: deps ディレクトリのパス
+
+    Returns:
+        tuple: (success: bool, error_message: str)
+    """
+    if not os.path.exists(deps_path):
+        try:
+            os.makedirs(deps_path)
+            return True, ""
+        except OSError as e:
+            return False, f"deps ディレクトリの作成に失敗: {str(e)}"
+
+    try:
+        shutil.rmtree(deps_path)
+        os.makedirs(deps_path)
+        print(f"deps ディレクトリをクリーンアップしました: {deps_path}")
+        return True, ""
+    except PermissionError:
+        return False, "ファイルがロックされています。Blenderを再起動してから再実行してください"
+    except OSError as e:
+        return False, f"deps ディレクトリの削除に失敗: {str(e)}"
 
 def reinstall_numpy_scipy_multithreaded():
     """
@@ -4718,13 +4759,22 @@ def reinstall_numpy_scipy_multithreaded():
             packages.append("scipy")
         
         libs_path = os.path.join(os.path.dirname(__file__), 'deps')
-        
-        # pip install --force-reinstall --user コマンドを実行
-        cmd = [python_path, "-m", "pip", "install", "--target", libs_path, "--force-reinstall"] + packages
-        
+
+        # deps ディレクトリをクリーンアップ（既存ファイルとの競合を防止）
         print(f"\n{'='*60}")
         print(f"NumPy・SciPy マルチスレッド対応再インストール開始")
         print(f"{'='*60}")
+        print(f"deps ディレクトリをクリーンアップ中: {libs_path}")
+
+        cleanup_success, cleanup_error = clean_deps_directory(libs_path)
+        if not cleanup_success:
+            print(f"クリーンアップ失敗: {cleanup_error}")
+            return False, "", cleanup_error
+
+        # pip install コマンドを実行（--force-reinstall は不要、クリーンな状態のため）
+        cmd = [python_path, "-m", "pip", "install", "--target", libs_path] + packages
+
+        print(f"クリーンアップ完了")
         print(f"NumPy バージョン: {numpy_version}")
         if scipy_version:
             print(f"SciPy バージョン: {scipy_version}")
@@ -4787,14 +4837,19 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
                     packages_info += f", SciPy {scipy_version}"
                 else:
                     packages_info += ", SciPy (新規インストール)"
-                
-                self.report({'INFO'}, f"{packages_info} をマルチスレッド対応版で再インストールしました")
-                print(f"NumPy・SciPy再インストール成功")
+
+                # 成功時は WARNING で再起動を促す
+                self.report({'WARNING'}, f"{packages_info} を再インストールしました。Blenderを再起動してください")
+                print(f"NumPy・SciPy再インストール成功。Blenderを再起動してください。")
             else:
-                error_msg = f"NumPy・SciPy再インストールに失敗しました"
-                if error:
-                    error_msg += f": {error}"
-                self.report({'ERROR'}, error_msg)
+                # ファイルロック時は明確なメッセージを表示
+                if "ロック" in error or "PermissionError" in error:
+                    self.report({'ERROR'}, error)
+                else:
+                    error_msg = f"NumPy・SciPy再インストールに失敗しました"
+                    if error:
+                        error_msg += f": {error}"
+                    self.report({'ERROR'}, error_msg)
             
             return {'FINISHED'}
         
