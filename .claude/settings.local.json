@@ -32,7 +32,8 @@
       "Bash(gh pr view:*)",
       "Bash(gh api:*)",
       "Bash(python -m py_compile:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(gh pr comment:*)"
     ]
   }
 }

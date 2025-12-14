@@ -4853,104 +4853,74 @@ def reinstall_numpy_scipy_multithreaded():
                 print(f"  {err_msg}")
                 return False, "", err_msg
 
-        # 一時ディレクトリを作成（リトライ機能付き）
+        # 一時ディレクトリを作成
+        # 注意: Microsoft Store版Blenderではos.makedirs()が失敗するため、
+        # cmd /c mkdir を優先的に使用する
         print(f"一時ディレクトリを作成中: {deps_new_path}")
-        import time
 
-        # デバッグ: 親ディレクトリの内容を確認
-        print(f"  [DEBUG] 親ディレクトリの内容を確認: {addon_dir}")
-        try:
-            parent_contents = os.listdir(addon_dir)
-            print(f"  [DEBUG] 親ディレクトリ内のアイテム数: {len(parent_contents)}")
-            # deps 関連のみ表示
-            deps_related = [f for f in parent_contents if 'deps' in f.lower()]
-            print(f"  [DEBUG] deps 関連アイテム: {deps_related}")
-        except Exception as list_err:
-            print(f"  [DEBUG] listdir 失敗: {list_err}")
-
-        # リトライ付きでディレクトリ作成を試みる
-        max_retries = 4
-        retry_delay = 0.5  # 500ms
-        last_error = None
-        actual_deps_new_path = deps_new_path
-
-        for attempt in range(max_retries):
-            if attempt > 0:
-                print(f"  リトライ {attempt + 1}/{max_retries}（{retry_delay}秒待機後）")
-                time.sleep(retry_delay)
-                retry_delay *= 2  # 指数バックオフ
-
-            # パスの状態をチェック
-            print(f"  [DEBUG] deps_new_path = {actual_deps_new_path}")
-            print(f"  [DEBUG] os.path.exists() = {os.path.exists(actual_deps_new_path)}")
-
-            # 方法1: os.makedirs
-            try:
-                os.makedirs(actual_deps_new_path, exist_ok=True)
-                print(f"一時ディレクトリを作成しました: {actual_deps_new_path}")
-                break  # 成功
-            except OSError as e:
-                last_error = e
-                print(f"  makedirs 失敗 (試行 {attempt + 1}): {e}")
-                print(f"  エラーコード: errno={e.errno}, winerror={getattr(e, 'winerror', 'N/A')}")
-
-            # 方法2: pathlib を試す
-            try:
-                from pathlib import Path
-                Path(actual_deps_new_path).mkdir(parents=True, exist_ok=True)
-                print(f"  pathlib.mkdir 成功!")
-                break
-            except OSError as e:
-                print(f"  pathlib.mkdir も失敗: {e}")
-
-            # 方法3: Windows cmd /c mkdir を試す
+        def create_directory_windows(path: str) -> tuple:
+            """
+            Windowsでディレクトリを作成する。
+            Store版Blenderのサンドボックス環境に対応するため、
+            cmd /c mkdir を優先的に使用する。
+            """
+            # 方法1: cmd /c mkdir（Store版Blender対応）
             try:
                 result = subprocess.run(
-                    ['cmd', '/c', 'mkdir', actual_deps_new_path],
+                    ['cmd', '/c', 'mkdir', path],
                     capture_output=True,
                     text=True,
                     shell=False
                 )
                 if result.returncode == 0:
-                    print(f"  cmd /c mkdir 成功!")
-                    break
-                else:
-                    print(f"  cmd /c mkdir 失敗: {result.stderr}")
-            except Exception as cmd_err:
-                print(f"  cmd /c mkdir 例外: {cmd_err}")
+                    return True, "cmd"
+                # 既に存在する場合もエラーコード1が返る
+                if os.path.isdir(path):
+                    return True, "cmd (already exists)"
+            except Exception as e:
+                print(f"  cmd /c mkdir 例外: {e}")
 
-            # 最後のリトライ前に代替パスを試す
-            if attempt == max_retries - 2:
-                actual_deps_new_path = os.path.join(addon_dir, f'deps_new_{int(time.time())}')
-                print(f"  代替パスに切り替え: {actual_deps_new_path}")
-        else:
-            # 全リトライ失敗 - 追加診断を出力
-            print(f"\n  [DIAG] === 追加診断情報 ===")
-            print(f"  [DIAG] addon_dir exists: {os.path.exists(addon_dir)}")
-            print(f"  [DIAG] addon_dir is_dir: {os.path.isdir(addon_dir)}")
-            print(f"  [DIAG] addon_dir writable: {os.access(addon_dir, os.W_OK)}")
+            # 方法2: os.makedirs（通常環境用フォールバック）
             try:
-                # 親ディレクトリ内に一時ファイルを作成してみる
-                test_file = os.path.join(addon_dir, f'_test_{int(time.time())}.tmp')
-                with open(test_file, 'w') as f:
-                    f.write('test')
-                os.remove(test_file)
-                print(f"  [DIAG] 一時ファイル作成テスト: 成功")
-            except Exception as test_err:
-                print(f"  [DIAG] 一時ファイル作成テスト: 失敗 - {test_err}")
-            return False, "", f"一時ディレクトリの作成に失敗（{max_retries}回試行）: {last_error}"
+                os.makedirs(path, exist_ok=True)
+                return True, "os.makedirs"
+            except OSError as e:
+                print(f"  os.makedirs 失敗: {e}")
 
-        # actual_deps_new_path が変わった場合、deps_new_path を更新
-        deps_new_path = actual_deps_new_path
+            return False, ""
+
+        success, method = create_directory_windows(deps_new_path)
+        if success:
+            print(f"一時ディレクトリを作成しました（{method}）")
+        else:
+            return False, "", f"一時ディレクトリの作成に失敗: {deps_new_path}"
+
+        # pip用の一時ディレクトリを作成（同じドライブに配置してWinError 17を回避）
+        pip_tmp_path = os.path.join(deps_new_path, '_pip_tmp')
+        success, method = create_directory_windows(pip_tmp_path)
+        if success:
+            print(f"pip一時ディレクトリを作成しました: {pip_tmp_path}")
 
         # pip install を一時ディレクトリに実行
-        cmd = [python_path, "-m", "pip", "install", "--target", deps_new_path] + packages
+        # --no-cache-dir: キャッシュを使わない（移動問題を軽減）
+        cmd = [python_path, "-m", "pip", "install",
+               "--no-cache-dir",
+               "--target", deps_new_path] + packages
         print(f"実行コマンド: {' '.join(cmd)}")
 
         # 環境変数を設定
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
         env['PYTHONLEGACYWINDOWSSTDIO'] = '1'
+
+        # pip の一時ディレクトリを deps_new と同じ場所に設定
+        # これにより WinError 17（クロスドライブ移動エラー）を回避
+        # Microsoft Store版Blenderのサンドボックス環境で必要
+        env['TMPDIR'] = pip_tmp_path
+        env['TEMP'] = pip_tmp_path
+        env['TMP'] = pip_tmp_path
+        env['PIP_NO_CACHE_DIR'] = '1'
+        print(f"pip一時ディレクトリを設定: {pip_tmp_path}")
 
         # コマンドを実行
         result = subprocess.run(
@@ -4976,6 +4946,10 @@ def reinstall_numpy_scipy_multithreaded():
 
         # pip 成功: ディレクトリを置き換え
         print("pip install 成功。ディレクトリを置き換え中...")
+
+        # pip用一時ディレクトリを削除
+        if os.path.exists(pip_tmp_path):
+            safe_rmtree(pip_tmp_path)
 
         # 既存の deps があれば deps_old にリネーム
         if os.path.exists(deps_path):
