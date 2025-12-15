@@ -24,9 +24,17 @@ def clear_scene():
 
 def import_fbx(filepath):
     """FBX をインポートして Armature を返す"""
+    # インポート前の Armature 名を記録
+    existing_armatures = {obj.name for obj in bpy.data.objects if obj.type == 'ARMATURE'}
+
     bpy.ops.import_scene.fbx(filepath=filepath)
 
-    # インポートされた Armature を探す
+    # インポート後に追加された Armature を探す（より堅牢な方法）
+    for obj in bpy.data.objects:
+        if obj.type == 'ARMATURE' and obj.name not in existing_armatures:
+            return obj
+
+    # フォールバック: 選択状態から探す
     for obj in bpy.context.selected_objects:
         if obj.type == 'ARMATURE':
             return obj

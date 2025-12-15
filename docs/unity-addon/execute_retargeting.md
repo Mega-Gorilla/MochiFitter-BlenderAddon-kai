@@ -168,9 +168,8 @@ Step 2: ペア 2/2 (Template → mao)
 │   4. deformation_template_to_mao.npz で変形適用                          │
 │   5. ウェイト転送・ボーン置換                                             │
 │                                                                         │
-│ hips_position: base_armature から自動計算 (mao の Hips 位置)             │
-│   ※ i > 0 では --hips-position は使われず、base_armature から取得         │
-│ Hip Offset: (0, -0.0255, 0.0589) → 適用                                 │
+│ hips_position: --hips-position で指定（または None）                      │
+│ 位置調整: posediff の delta_matrix に含まれる平行移動で自動適用            │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -198,15 +197,18 @@ def adjust_armature_hips_position(armature_obj, target_position, clothing_avatar
 
 ### チェーン処理での動作
 
-| ステップ | hips_position の値 | 由来 | 結果 |
-|---------|-------------------|------|------|
-| i = 0 | `--hips-position` の値 | Unity が渡す（ソースアバター位置） | offset ≈ 0 でスキップされることが多い |
-| i > 0 | `base_armature` から自動計算 | PR #17 で追加 | ターゲットアバター位置に調整 |
+| ステップ | hips_position の値 | 位置調整の仕組み |
+|---------|-------------------|-----------------|
+| i = 0 | `--hips-position` の値 | Unity が渡す値で調整（offset ≈ 0 でスキップされることが多い） |
+| i > 0 | `None`（通常） | `posediff` の `delta_matrix` に含まれる平行移動で自動調整 |
+
+> **Note**: チェーン処理での位置調整は、`posediff_*.json` の `delta_matrix` に
+> 平行移動成分（例: Z +5.95cm）が含まれているため、`--hips-position` がなくても
+> 正しく動作します。詳細は [Issue #15](https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/issues/15) を参照。
 
 ### 関連 Issue
 
-- [Issue #15](https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/issues/15): チェーン処理時の Hips 位置調整
-- [PR #17](https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/pull/17): i > 0 での自動計算を追加
+- [Issue #15](https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/issues/15): チェーン処理時の Hips 位置調整（生成プロセス修正で解決）
 
 ## ログ出力の解説
 
@@ -230,10 +232,12 @@ Pose data added to armature 'Armature' from posediff_beryl_to_template.json
 ### チェーン処理時の特徴的なログ
 
 ```
-# Step 2 では base_armature から自動計算
-Auto-calculated hips position from base armature: <Vector (0.0000, -0.0302, 0.9064)>
-Hip Offset: <Vector (0.0000, -0.0255, 0.0589)>
+# Step 2 では posediff の delta_matrix で位置調整が行われる
+Pose data added to armature 'Armature' from posediff_template_to_mao.json
 ```
+
+> **Note**: 位置調整は `posediff` の `delta_matrix` に含まれる平行移動成分で
+> 自動的に行われます。`--hips-position` による明示的な調整ログは出力されません。
 
 ## config JSON とパラメータの関係
 
