@@ -258,8 +258,8 @@ Hip Offset: <Vector (0.0000, -0.0255, 0.0589)>
     │                                                │
     ├── pose_basis_beryl.json ───────────────────────┤
     │   └── head_world: [0, 0.009557, 0.930285] ─────┼── → --hips-position
-    ├── pose_basis_template.json ────────────────────┤
-    ├── pose_basis_mao.json ─────────────────────────┤
+    ├── pose_basis_template.json (※1) ──────────────┤
+    ├── pose_basis_mao.json (※2) ───────────────────┤
     │                                                │
     ├── posediff_beryl_to_template.json ─────────────┤
     ├── posediff_template_to_mao.json ───────────────┤
@@ -279,6 +279,17 @@ Hip Offset: <Vector (0.0000, -0.0255, 0.0589)>
                                                      ▼
                                            [リターゲット済み FBX]
 ```
+
+### pose_basis ファイルの種類
+
+| ファイル | 内容 | 特徴 |
+|---------|------|------|
+| (※1) pose_basis_template.json | Template の Rest Pose | scale = 1.0, delta_matrix ≈ 単位行列 |
+| (※2) pose_basis_mao.json | Template → mao の変換情報 | scale ≈ 1.02（mao は Template より約2%大きい） |
+
+> **Note**: `pose_basis_<target>.json` は Template からの変換情報を含むため、
+> `posediff_template_to_<target>.json` と実質的に同じ形式です。
+> 詳細は [Blender アドオン - データフォーマット](../blender-addon/data_formats.md#pose_basisjson) を参照。
 
 ## トラブルシューティング
 
