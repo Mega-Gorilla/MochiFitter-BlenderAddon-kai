@@ -3904,7 +3904,7 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
     bl_idname = "object.export_rbf_temp_data"
     bl_label = "Save Deformation Data"
     bl_options = {'REGISTER', 'UNDO'}
-    
+
     # ExportHelperのプロパティ
     filename_ext = ".npz"
     filter_glob: bpy.props.StringProperty(
@@ -3912,14 +3912,75 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
         options={'HIDDEN'},
         maxlen=255,
     )
-    
+
+    # Modal処理用のクラス変数
+    _timer = None
+    _thread = None
+    _process = None
+    _queue = None
+    _progress = 0.0
+    _status_message = ""
+    _default_paths = None
+    _save_shape_key_mode = False
+    _dot_count = 0
+
+    def modal(self, context, event):
+        import queue as queue_module
+        import re
+
+        if event.type == 'TIMER':
+            # アニメーション更新
+            self._dot_count = (self._dot_count + 1) % 4
+            dots = "." * (self._dot_count + 1)
+
+            # Queue から非ブロッキングでログを取得
+            try:
+                while True:
+                    item = self._queue.get_nowait()
+                    if item[0] == 'LOG':
+                        line = item[1]
+                        print(f"[RBF処理] {line}")
+                        # 進捗パース（例: "進捗: 1000/10000 頂点処理完了 (10.0%)"）
+                        match = re.search(r'\((\d+\.?\d*)%\)', line)
+                        if match:
+                            self._progress = float(match.group(1))
+                        # ステータスメッセージを更新（最後の50文字）
+                        self._status_message = line[-50:] if len(line) > 50 else line
+                    elif item[0] == 'DONE':
+                        returncode = item[1]
+                        self._finish(context, returncode == 0)
+                        return {'FINISHED'}
+                    elif item[0] == 'ERROR':
+                        error_msg = item[1]
+                        self._finish_with_error(context, error_msg)
+                        return {'CANCELLED'}
+            except queue_module.Empty:
+                pass
+
+            # UI更新
+            if self._progress > 0:
+                context.workspace.status_text_set(
+                    f"RBF処理中{dots} {self._progress:.1f}%"
+                )
+            else:
+                context.workspace.status_text_set(f"RBF処理中{dots}")
+
+        elif event.type == 'ESC':
+            self._cancel_process(context)
+            return {'CANCELLED'}
+
+        return {'PASS_THROUGH'}
+
     def execute(self, context):
+        import threading
+        import queue as queue_module
+
         # オブジェクトモードに切り替え
         if context.object and context.object.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
-        
+
         scene = context.scene
-        
+
         # 必要なパラメータを取得
         source_obj = scene.rbf_source_obj
         source_shape_key_name = scene.rbf_source_shape_key
@@ -3934,34 +3995,35 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
         shape_key_start_value = scene.rbf_shape_key_start_value
         shape_key_end_value = scene.rbf_shape_key_end_value
         enable_x_mirror = scene.rbf_enable_x_mirror
-        
+
         # アバター名の検証
         if not source_avatar_name or not target_avatar_name:
             self.report({'ERROR'}, "アバター名を設定してください")
             return {'CANCELLED'}
-        
+
         # シェイプキーの値の範囲検証
         if shape_key_start_value == shape_key_end_value:
             self.report({'ERROR'}, "シェイプキーの開始値と終了値は異なる値を設定してください")
             return {'CANCELLED'}
 
-        
-        default_paths = []
+
+        self._default_paths = []
         scene_folder = get_scene_folder()
-        
+        self._save_shape_key_mode = save_shape_key_mode
+
         if scene.rbf_save_shape_key_mode:
             # シェイプキー変形モードの場合
-            default_paths.append(os.path.join(scene_folder, f"deformation_{scene.rbf_source_avatar_name}_shape_{scene.rbf_source_shape_key}.npz"))
-            default_paths.append(os.path.join(scene_folder, f"deformation_{scene.rbf_source_avatar_name}_shape_{scene.rbf_source_shape_key}_inv.npz"))
+            self._default_paths.append(os.path.join(scene_folder, f"deformation_{scene.rbf_source_avatar_name}_shape_{scene.rbf_source_shape_key}.npz"))
+            self._default_paths.append(os.path.join(scene_folder, f"deformation_{scene.rbf_source_avatar_name}_shape_{scene.rbf_source_shape_key}_inv.npz"))
         else:
             # 通常のアバター間変形の場合
-            default_paths.append(os.path.join(scene_folder, f"deformation_{scene.rbf_source_avatar_name}_to_{scene.rbf_target_avatar_name}.npz"))
-        
+            self._default_paths.append(os.path.join(scene_folder, f"deformation_{scene.rbf_source_avatar_name}_to_{scene.rbf_target_avatar_name}.npz"))
+
         try:
-            # 一時データをエクスポート
+            # 一時データをエクスポート（同期処理 - 高速なため問題なし）
             temp_file_paths = export_rbf_temp_data(
-                source_obj, 
-                source_shape_key_name, 
+                source_obj,
+                source_shape_key_name,
                 selected_only,
                 epsilon,
                 num_steps,
@@ -3974,62 +4036,196 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                 shape_key_end_value,
                 enable_x_mirror
             )
-            
+
             # 保存されたファイルの情報を生成
             file_list = ", ".join([os.path.basename(path) for path in temp_file_paths])
             self.report({'INFO'}, f"一時データをエクスポートしました: {file_list}")
 
-            self.report({'INFO'}, "マルチスレッド処理を開始しています...")
-            
-            # 一時ファイルを処理（invファイルはrbf_processorにより自動認識される）
-            success_count = 0
-            error_messages = []
-            
             base_temp_path = temp_file_paths[0]
-            
+
             print(f"\n{'='*60}")
             print(f"RBF処理開始: {os.path.basename(base_temp_path)}")
             print(f"{'='*60}")
-            
-            success, output, error = run_rbf_processor(base_temp_path)
-            
-            if success:
-                if default_paths[0] and os.path.exists(default_paths[0]):
-                    if os.path.abspath(default_paths[0]) != os.path.abspath(self.filepath):
-                        shutil.copy2(default_paths[0], self.filepath)
-                if scene.rbf_save_shape_key_mode and default_paths[1] and os.path.exists(default_paths[1]):
-                    inv_filepath = self.filepath[:-4] + "_inv.npz"
-                    if os.path.abspath(default_paths[1]) != os.path.abspath(inv_filepath):
-                        shutil.copy2(default_paths[1], inv_filepath)
-            
-                success_count += 1
-                print(f"処理成功: {os.path.basename(base_temp_path)}")
-            else:
-                error_msg = f"処理失敗 {os.path.basename(base_temp_path)}: {error}"
-                error_messages.append(error_msg)
-                print(error_msg)
-            
-            # 結果のレポート
-            if success_count == len([p for p in temp_file_paths if not p.endswith('_inv.npz')]):
-                self.report({'INFO'}, f"全ての処理が完了しました ({success_count}個)")
-            elif success_count > 0:
-                self.report({'WARNING'}, f"一部の処理が完了しました ({success_count}個/部分的)")
-                for error_msg in error_messages:
-                    print(f"エラー: {error_msg}")
-            else:
-                error_summary = "; ".join(error_messages[:3])  # 最初の3つのエラーを表示
-                self.report({'ERROR'}, f"マルチスレッド処理に失敗しました: {error_summary}")
-                return {'CANCELLED'}
-            
-            return {'FINISHED'}
-        
+
+            # Queue 初期化
+            self._queue = queue_module.Queue()
+            self._progress = 0.0
+            self._status_message = ""
+            self._dot_count = 0
+
+            # メインスレッドで事前に取得する必要がある値
+            python_path = get_blender_python_path()
+            processor_path = get_rbf_processor_script_path()
+            blender_lib_paths = get_blender_python_lib_paths()
+            user_site_packages = get_blender_python_user_site_packages(python_path)
+            blender_deps_path = os.path.join(os.path.dirname(__file__), 'deps')
+            filepath = self.filepath  # ExportHelperで設定されたファイルパス
+
+            # バックグラウンドスレッドで実行する関数
+            def run_rbf_background():
+                try:
+                    # パスの存在確認
+                    if not os.path.exists(python_path):
+                        self._queue.put(('ERROR', f"Pythonバイナリが見つかりません: {python_path}"))
+                        return
+
+                    if not os.path.exists(processor_path):
+                        self._queue.put(('ERROR', f"RBFプロセッサスクリプトが見つかりません: {processor_path}"))
+                        return
+
+                    # 環境変数を設定
+                    env = os.environ.copy()
+                    env['PYTHONIOENCODING'] = 'utf-8'
+                    env['PYTHONLEGACYWINDOWSSTDIO'] = '1'
+                    env['PYTHONUNBUFFERED'] = '1'
+
+                    # PYTHONPATHを設定
+                    pythonpath_parts = []
+                    if 'PYTHONPATH' in env:
+                        pythonpath_parts.append(env['PYTHONPATH'])
+                    if blender_deps_path:
+                        pythonpath_parts.append(blender_deps_path)
+                    if user_site_packages:
+                        pythonpath_parts.append(user_site_packages)
+                    pythonpath_parts.extend(blender_lib_paths)
+                    env['PYTHONPATH'] = os.pathsep.join(pythonpath_parts)
+
+                    # Phase 1-B: BLAS スレッド数を固定値に制限（オーバーサブスクライブ防止）
+                    env['OMP_NUM_THREADS'] = '2'
+                    env['OPENBLAS_NUM_THREADS'] = '2'
+                    env['MKL_NUM_THREADS'] = '2'
+                    env['VECLIB_MAXIMUM_THREADS'] = '2'
+                    env['NUMEXPR_NUM_THREADS'] = '2'
+
+                    # Phase 1-B: ワーカー数を制限
+                    max_workers = min(4, os.cpu_count() or 4)
+
+                    # コマンドを構築
+                    cmd = [python_path, '-u', processor_path, base_temp_path,
+                           '--max-workers', str(max_workers)]
+
+                    print(f"実行コマンド: {' '.join(cmd)}")
+                    print(f"max_workers: {max_workers}, OMP_NUM_THREADS: 2")
+
+                    # プロセスを起動
+                    self._process = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding='utf-8',
+                        errors='replace',
+                        cwd=os.path.dirname(base_temp_path),
+                        env=env,
+                        bufsize=1,
+                        universal_newlines=True
+                    )
+
+                    # stdout を読み取り、Queue に送信
+                    for line in iter(self._process.stdout.readline, ''):
+                        if line:
+                            self._queue.put(('LOG', line.rstrip('\n\r')))
+
+                    # プロセス完了を待つ
+                    self._process.wait()
+
+                    # 成功時はファイルをコピー
+                    if self._process.returncode == 0:
+                        if self._default_paths[0] and os.path.exists(self._default_paths[0]):
+                            if os.path.abspath(self._default_paths[0]) != os.path.abspath(filepath):
+                                shutil.copy2(self._default_paths[0], filepath)
+                        if self._save_shape_key_mode and len(self._default_paths) > 1 and self._default_paths[1] and os.path.exists(self._default_paths[1]):
+                            inv_filepath = filepath[:-4] + "_inv.npz"
+                            if os.path.abspath(self._default_paths[1]) != os.path.abspath(inv_filepath):
+                                shutil.copy2(self._default_paths[1], inv_filepath)
+
+                    self._queue.put(('DONE', self._process.returncode))
+
+                except Exception as e:
+                    error_msg = f"RBF処理中にエラーが発生しました: {str(e)}"
+                    print(error_msg)
+                    print(traceback.format_exc())
+                    self._queue.put(('ERROR', error_msg))
+
+            # バックグラウンドスレッドを起動
+            self._thread = threading.Thread(target=run_rbf_background)
+            self._thread.start()
+
+            # タイマーを設定（0.1秒ごとにチェック）
+            self._timer = context.window_manager.event_timer_add(0.1, window=context.window)
+            context.window_manager.modal_handler_add(self)
+
+            # ステータスバーに表示開始
+            context.workspace.status_text_set("RBF処理を開始しています...")
+
+            self.report({'INFO'}, "マルチプロセス処理を開始しました（バックグラウンドで実行中）")
+
+            return {'RUNNING_MODAL'}
+
         except Exception as e:
             error_msg = f"エラーが発生しました: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
             return {'CANCELLED'}
-    
+
+    def _finish(self, context, success):
+        """処理完了時の処理"""
+        self._cleanup(context)
+
+        if success:
+            self.report({'INFO'}, "RBF処理が正常に完了しました")
+            print("RBF処理が正常に完了しました")
+
+            # 成功ポップアップを表示
+            def draw_success_popup(self, context):
+                self.layout.label(text="Deformation Field の生成が完了しました")
+
+            context.window_manager.popup_menu(draw_success_popup, title="処理完了", icon='CHECKMARK')
+        else:
+            self.report({'ERROR'}, "RBF処理でエラーが発生しました")
+            print("RBF処理でエラーが発生しました")
+
+        # UIを更新
+        for area in context.screen.areas:
+            area.tag_redraw()
+
+    def _finish_with_error(self, context, error_msg):
+        """エラー終了時の処理"""
+        self._cleanup(context)
+        self.report({'ERROR'}, error_msg)
+        print(f"RBF処理エラー: {error_msg}")
+
+        # UIを更新
+        for area in context.screen.areas:
+            area.tag_redraw()
+
+    def _cancel_process(self, context):
+        """処理をキャンセル"""
+        if self._process:
+            try:
+                self._process.terminate()
+                print("RBF処理をキャンセルしました")
+            except Exception as e:
+                print(f"プロセス終了中にエラー: {e}")
+
+        self._cleanup(context)
+        self.report({'WARNING'}, "RBF処理がキャンセルされました")
+
+    def _cleanup(self, context):
+        """リソースのクリーンアップ"""
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        context.workspace.status_text_set(None)
+        self._process = None
+        self._thread = None
+        self._queue = None
+
+    def cancel(self, context):
+        """キャンセル時の処理（Blenderから呼ばれる）"""
+        self._cancel_process(context)
+
     def invoke(self, context, event):
         # デフォルトファイル名を設定
         scene = context.scene
@@ -4037,7 +4233,7 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
         target_avatar_name = scene.rbf_target_avatar_name
         source_shape_key_name = scene.rbf_source_shape_key
         save_shape_key_mode = scene.rbf_save_shape_key_mode
-        
+
         filename = "deformation.npz"
         if source_avatar_name:
             if save_shape_key_mode:
@@ -4047,7 +4243,7 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                 # 通常の変形モードの場合
                 filename = f"deformation_{source_avatar_name}_to_{target_avatar_name}"
             self.filepath = filename + ".npz"
-        
+
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
