@@ -3924,6 +3924,9 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
     _save_shape_key_mode = False
     _dot_count = 0
     _temp_file_paths = None  # Phase 2: 一時ファイルパスを保持（キャンセル時クリーンアップ用）
+    # Phase 3: 進捗UI強化用
+    _current_phase = ""  # 現在のフェーズ名（距離計算/変形/フォールオフ）
+    _progress_started = False  # window_manager.progress が開始されているか
 
     def modal(self, context, event):
         import queue as queue_module
@@ -3945,10 +3948,33 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                     if item[0] == 'LOG':
                         line = item[1]
                         print(f"[RBF処理] {line}")
+
+                        # Phase 3: フェーズ検出
+                        if '距離計算進捗' in line or '距離計算を' in line:
+                            self._current_phase = "距離計算"
+                        elif 'マルチプロセスRBF補間を開始' in line:
+                            self._current_phase = "変形"
+                        elif 'フォールオフ処理を適用中' in line:
+                            self._current_phase = "フォールオフ"
+                            self._progress = 95.0  # フォールオフは最終段階
+
                         # 進捗パース（例: "進捗: 1000/10000 頂点処理完了 (10.0%)"）
                         match = re.search(r'\((\d+\.?\d*)%\)', line)
                         if match:
-                            self._progress = float(match.group(1))
+                            raw_progress = float(match.group(1))
+                            # Phase 3: フェーズに応じて全体進捗を計算
+                            # 距離計算: 0-30%, 変形: 30-95%, フォールオフ: 95-100%
+                            if self._current_phase == "距離計算":
+                                self._progress = raw_progress * 0.30
+                            elif self._current_phase == "変形":
+                                self._progress = 30.0 + raw_progress * 0.65
+                            else:
+                                self._progress = raw_progress
+
+                            # Phase 3: window_manager.progress を更新
+                            if self._progress_started:
+                                context.window_manager.progress_update(int(self._progress))
+
                         # ステータスメッセージを更新（最後の50文字）
                         self._status_message = line[-50:] if len(line) > 50 else line
                     elif item[0] == 'DONE':
@@ -3962,10 +3988,11 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
             except queue_module.Empty:
                 pass
 
-            # UI更新
+            # Phase 3: UI更新（フェーズ名を含む）
             if self._progress > 0:
+                phase_str = f"[{self._current_phase}] " if self._current_phase else ""
                 context.workspace.status_text_set(
-                    f"RBF処理中{dots} {self._progress:.1f}%"
+                    f"RBF処理中{dots} {phase_str}{self._progress:.1f}%"
                 )
             else:
                 context.workspace.status_text_set(f"RBF処理中{dots}")
@@ -4057,6 +4084,10 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
             self._progress = 0.0
             self._status_message = ""
             self._dot_count = 0
+            # Phase 3: 進捗UI強化用の初期化
+            self._current_phase = ""
+            self._progress_started = True
+            context.window_manager.progress_begin(0, 100)
 
             # メインスレッドで事前に取得する必要がある値
             python_path = get_blender_python_path()
@@ -4278,6 +4309,11 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
             context.window_manager.event_timer_remove(self._timer)
             self._timer = None
         context.workspace.status_text_set(None)
+        # Phase 3: プログレスバーを終了
+        if self._progress_started:
+            context.window_manager.progress_end()
+            self._progress_started = False
+        self._current_phase = ""
         self._process = None
         self._thread = None
         self._queue = None
