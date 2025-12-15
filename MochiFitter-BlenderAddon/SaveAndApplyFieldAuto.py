@@ -3923,6 +3923,7 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
     _default_paths = None
     _save_shape_key_mode = False
     _dot_count = 0
+    _temp_file_paths = None  # Phase 2: 一時ファイルパスを保持（キャンセル時クリーンアップ用）
 
     def modal(self, context, event):
         import queue as queue_module
@@ -4025,7 +4026,7 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
 
         try:
             # 一時データをエクスポート（同期処理 - 高速なため問題なし）
-            temp_file_paths = export_rbf_temp_data(
+            self._temp_file_paths = export_rbf_temp_data(
                 source_obj,
                 source_shape_key_name,
                 selected_only,
@@ -4042,10 +4043,10 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
             )
 
             # 保存されたファイルの情報を生成
-            file_list = ", ".join([os.path.basename(path) for path in temp_file_paths])
+            file_list = ", ".join([os.path.basename(path) for path in self._temp_file_paths])
             self.report({'INFO'}, f"一時データをエクスポートしました: {file_list}")
 
-            base_temp_path = temp_file_paths[0]
+            base_temp_path = self._temp_file_paths[0]
 
             print(f"\n{'='*60}")
             print(f"RBF処理開始: {os.path.basename(base_temp_path)}")
@@ -4214,15 +4215,51 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
 
     def _cancel_process(self, context):
         """処理をキャンセル"""
+        import sys
+
         if self._process:
             try:
-                self._process.terminate()
+                pid = self._process.pid
+                print(f"RBF処理をキャンセルしています (PID: {pid})...")
+
+                # Phase 2: Windows では taskkill を使用して子プロセスも含めて終了
+                if sys.platform == 'win32':
+                    try:
+                        # /T: 子プロセスも終了, /F: 強制終了
+                        kill_cmd = ['taskkill', '/T', '/F', '/PID', str(pid)]
+                        subprocess.run(kill_cmd, capture_output=True, timeout=5)
+                        print(f"taskkill で子プロセスを含めて終了しました (PID: {pid})")
+                    except subprocess.TimeoutExpired:
+                        print("taskkill がタイムアウトしました。terminate() を試行...")
+                        self._process.terminate()
+                    except Exception as e:
+                        print(f"taskkill でエラー: {e}。terminate() を試行...")
+                        self._process.terminate()
+                else:
+                    # Unix 系では terminate() を使用
+                    self._process.terminate()
+
                 print("RBF処理をキャンセルしました")
             except Exception as e:
                 print(f"プロセス終了中にエラー: {e}")
 
+        # Phase 2: 一時ファイルをクリーンアップ
+        self._cleanup_temp_files()
+
         self._cleanup(context)
         self.report({'WARNING'}, "RBF処理がキャンセルされました")
+
+    def _cleanup_temp_files(self):
+        """一時ファイルをクリーンアップ（キャンセル時のみ）"""
+        if self._temp_file_paths:
+            for temp_path in self._temp_file_paths:
+                try:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                        print(f"一時ファイルを削除しました: {os.path.basename(temp_path)}")
+                except Exception as e:
+                    print(f"一時ファイル削除エラー ({os.path.basename(temp_path)}): {e}")
+            self._temp_file_paths = None
 
     def _cleanup(self, context):
         """リソースのクリーンアップ"""
