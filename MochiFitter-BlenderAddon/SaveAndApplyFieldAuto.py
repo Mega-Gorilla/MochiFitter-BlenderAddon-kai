@@ -4184,6 +4184,8 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
 
     def _finish(self, context, success):
         """処理完了時の処理"""
+        # 正常終了時は一時ファイルを削除せず、参照のみクリア
+        self._temp_file_paths = None
         self._cleanup(context)
 
         if success:
@@ -4205,6 +4207,8 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
 
     def _finish_with_error(self, context, error_msg):
         """エラー終了時の処理"""
+        # エラー終了時も参照のみクリア（一時ファイルはデバッグ用に残す）
+        self._temp_file_paths = None
         self._cleanup(context)
         self.report({'ERROR'}, error_msg)
         print(f"RBF処理エラー: {error_msg}")
@@ -4227,8 +4231,15 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                     try:
                         # /T: 子プロセスも終了, /F: 強制終了
                         kill_cmd = ['taskkill', '/T', '/F', '/PID', str(pid)]
-                        subprocess.run(kill_cmd, capture_output=True, timeout=5)
-                        print(f"taskkill で子プロセスを含めて終了しました (PID: {pid})")
+                        result = subprocess.run(kill_cmd, capture_output=True, timeout=5)
+                        if result.returncode == 0:
+                            print(f"taskkill で子プロセスを含めて終了しました (PID: {pid})")
+                        else:
+                            # taskkill が失敗した場合（プロセスが既に終了している等）
+                            stderr_msg = result.stderr.decode('utf-8', errors='replace').strip()
+                            print(f"taskkill が returncode={result.returncode} で終了: {stderr_msg}")
+                            print("terminate() を試行...")
+                            self._process.terminate()
                     except subprocess.TimeoutExpired:
                         print("taskkill がタイムアウトしました。terminate() を試行...")
                         self._process.terminate()
