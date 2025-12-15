@@ -3957,6 +3957,9 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                         elif 'フォールオフ処理を適用中' in line:
                             self._current_phase = "フォールオフ"
                             self._progress = 95.0  # フォールオフは最終段階
+                            # Phase 3: フォールオフ突入時にプログレスバーを即座に更新
+                            if self._progress_started:
+                                context.window_manager.progress_update(95)
 
                         # 進捗パース（例: "進捗: 1000/10000 頂点処理完了 (10.0%)"）
                         match = re.search(r'\((\d+\.?\d*)%\)', line)
@@ -3979,6 +3982,10 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                         self._status_message = line[-50:] if len(line) > 50 else line
                     elif item[0] == 'DONE':
                         returncode = item[1]
+                        # Phase 3: 完了時に100%を表示
+                        if self._progress_started:
+                            self._progress = 100.0
+                            context.window_manager.progress_update(100)
                         self._finish(context, returncode == 0)
                         return {'FINISHED'}
                     elif item[0] == 'ERROR':
@@ -4210,6 +4217,10 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
             error_msg = f"エラーが発生しました: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
+            # Phase 3: 例外時もプログレスバーを確実に終了
+            if self._progress_started:
+                context.window_manager.progress_end()
+                self._progress_started = False
             self.report({'ERROR'}, error_msg)
             return {'CANCELLED'}
 
