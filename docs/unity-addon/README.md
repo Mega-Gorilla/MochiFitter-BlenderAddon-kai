@@ -9,6 +9,7 @@
 | ドキュメント | 説明 |
 |-------------|------|
 | [overview.md](overview.md) | Unity 側の処理フロー概要 |
+| [execute_retargeting.md](execute_retargeting.md) | Execute Retargeting コマンド詳細 |
 | [config_format.md](config_format.md) | config JSON 仕様 |
 | [blender_script.md](blender_script.md) | リターゲットスクリプト解説（GPL v3） |
 | [UPSTREAM_CHANGELOG.md](UPSTREAM_CHANGELOG.md) | 本家アドオンの変更履歴 |
