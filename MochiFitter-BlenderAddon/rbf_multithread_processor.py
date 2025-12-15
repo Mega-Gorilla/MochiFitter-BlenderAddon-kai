@@ -480,12 +480,8 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
         max_workers
     )
 
-    os.environ['OMP_NUM_THREADS'] = str(os.cpu_count())
-    os.environ['OPENBLAS_NUM_THREADS'] = str(os.cpu_count())
-    os.environ['MKL_NUM_THREADS'] = str(os.cpu_count())
-    os.environ['VECLIB_MAXIMUM_THREADS'] = str(os.cpu_count())
-    os.environ['NUMEXPR_NUM_THREADS'] = str(os.cpu_count())
-    
+    # Note: BLAS スレッド数は固定値（2）のまま維持（処理後に戻す必要なし）
+
     if memory_monitor.enabled:
         final_memory = memory_monitor.get_memory_usage()
         print(f"最終メモリ使用量: {final_memory:.1f}GB (増加: {memory_monitor.get_memory_increase():.1f}GB)")
@@ -808,11 +804,15 @@ def main():
             args.max_workers = 1  # プロセスプールでは1つに制限
     
     print(f"CPU数: {os.cpu_count()}")
-    os.environ['OMP_NUM_THREADS'] = str(os.cpu_count())
-    os.environ['OPENBLAS_NUM_THREADS'] = str(os.cpu_count())
-    os.environ['MKL_NUM_THREADS'] = str(os.cpu_count())
-    os.environ['VECLIB_MAXIMUM_THREADS'] = str(os.cpu_count())
-    os.environ['NUMEXPR_NUM_THREADS'] = str(os.cpu_count())
+    # Phase 1-B: BLAS スレッド数を固定値に制限（プロセス並列との併用でオーバーサブスクライブ防止）
+    # ProcessPoolExecutor と BLAS スレッドの組み合わせで CPU/メモリが逼迫するのを防ぐ
+    blas_threads = '2'
+    os.environ['OMP_NUM_THREADS'] = blas_threads
+    os.environ['OPENBLAS_NUM_THREADS'] = blas_threads
+    os.environ['MKL_NUM_THREADS'] = blas_threads
+    os.environ['VECLIB_MAXIMUM_THREADS'] = blas_threads
+    os.environ['NUMEXPR_NUM_THREADS'] = blas_threads
+    print(f"BLAS スレッド数を {blas_threads} に制限しました")
     
     np.__config__.show()
     
