@@ -96,7 +96,9 @@ Unity
 
 > **Note**: スクリプト名はバージョンにより異なります（例: `retarget_script2_12.py`）。
 > スクリプトは多数の必須引数を要求します。
-> 詳細は [blender_script.md](blender_script.md) を参照してください。
+> 詳細は以下を参照してください：
+> - [execute_retargeting.md](execute_retargeting.md) - 実際のコマンド例とパラメータ詳細
+> - [blender_script.md](blender_script.md) - スクリプト内部処理の解説
 
 リターゲットスクリプトが行う処理：
 
@@ -135,6 +137,8 @@ Blender アドオン                    Unity アドオン
 
 ## 関連ドキュメント
 
+- [Execute Retargeting コマンド詳細](execute_retargeting.md) - 実際の呼び出しとパラメータ
 - [config JSON 仕様](config_format.md)
+- [リターゲットスクリプト解説](blender_script.md)
 - [Blender アドオン - データフォーマット](../blender-addon/data_formats.md)
 - [UPSTREAM_CHANGELOG](UPSTREAM_CHANGELOG.md) - 本家アドオンの変更履歴
