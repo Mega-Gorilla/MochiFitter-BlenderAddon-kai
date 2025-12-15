@@ -58,32 +58,66 @@ MochiFitterは以下のデータファイルを使用します：
 
 ## pose_basis_*.json
 
-アバターのベースポーズ（レストポーズからの変形）を保存します。
+ポーズ情報を保存します。用途によって2種類の形式があります。
 
-### 構造
+### 用途1: 基準アバターの Rest Pose
+
+`pose_basis_template.json` など、基準となるアバター（Template）の Rest Pose を保存します。
 
 ```json
 {
   "Hips": {
+    "delta_matrix": [[1,0,0,0], [0,1,0,0], [0,0,1,0], [0,0,0,1]],
     "location": [0.0, 0.0, 0.0],
     "rotation": [0.0, 0.0, 0.0],
     "scale": [1.0, 1.0, 1.0],
-    "head_world": [0.0, 0.009557, 0.930285],
-    "head_world_transformed": [0.0, 0.009557, 0.930285]
-  },
-  "Spine": {
-    ...
+    "head_world": [0.0, -0.00477, 0.8476],
+    "head_world_transformed": [0.0, -0.00477, 0.8476]
   }
 }
 ```
+
+**特徴:**
+- `scale` ≈ [1.0, 1.0, 1.0]
+- `delta_matrix` ≈ 単位行列
+- `head_world` = `head_world_transformed`（同じ値）
+
+### 用途2: Template → Target への変換情報
+
+`pose_basis_mao.json` など、Template からターゲットアバターへの変換情報を保存します。
+実質的に `posediff_template_to_*.json` と同じ形式です。
+
+```json
+{
+  "Hips": {
+    "delta_matrix": [[1.02,0,0,0], [0,1.02,0,0], [0,0,1.02,0.0595], [0,0,0,1]],
+    "location": [0.0, 0.0, 0.0763],
+    "rotation": [0.0, 0.0, 0.0],
+    "scale": [1.0198, 1.0198, 1.0198],
+    "head_world": [0.0, -0.00477, 0.8476],
+    "head_world_transformed": [0.0, -0.00477, 0.9238]
+  }
+}
+```
+
+**特徴:**
+- `scale` ≠ [1.0, 1.0, 1.0]（ターゲットのサイズに応じたスケール）
+- `delta_matrix` に変換情報を含む
+- `head_world` = Template の Hips 位置（変換前）
+- `head_world_transformed` = Target の Hips 位置（変換後）
+
+> **Note**: `pose_basis_<target>.json` は、ターゲットアバターが Template より
+> 大きい/小さい場合、そのサイズ比に応じた scale 値を持ちます。
+> 例: mao が Template より約2%大きい場合、scale ≈ 1.02
 
 ### フィールド説明
 
 | フィールド | 型 | 単位 | 説明 |
 |-----------|-----|------|------|
-| `location` | [x, y, z] | メートル | ボーンヘッドの移動量 |
-| `rotation` | [x, y, z] | 度 | オイラー角（XYZ順） |
-| `scale` | [x, y, z] | 倍率 | スケール |
+| `delta_matrix` | 4x4 matrix | - | 変換行列（必須） |
+| `location` | [x, y, z] | メートル | ボーンヘッドの移動量（参考値） |
+| `rotation` | [x, y, z] | 度 | オイラー角（XYZ順、参考値） |
+| `scale` | [x, y, z] | 倍率 | スケール（参考値） |
 | `head_world` | [x, y, z] | メートル | 変形前のボーンヘッド位置（ワールド座標） |
 | `head_world_transformed` | [x, y, z] | メートル | 変形後のボーンヘッド位置（ワールド座標） |
 
