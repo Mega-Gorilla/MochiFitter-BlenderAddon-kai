@@ -62,6 +62,19 @@ blender --background --python retarget_script2_12.py -- \
 | `--config` | リターゲット設定 JSON | Unity アドオンが生成 |
 | `--init-pose` | 初期ポーズ JSON | Unity アドオンが生成 |
 
+### 実運用上ほぼ必須のパラメータ
+
+以下のパラメータは argparse 上は optional ですが、`retarget_script2_12.py` 内部で
+実質必須として使用されています。Unity アドオンは常にこれらを渡します。
+
+| パラメータ | 説明 | 備考 |
+|-----------|------|------|
+| `--cloth-metadata` | 衣装メタデータ JSON | `load_cloth_metadata()` で使用 |
+| `--mesh-material-data` | マテリアル情報 JSON | `load_mesh_material_data()` で使用 |
+| `--target-meshes` | 処理対象メッシュ名 | 指定しないと全メッシュが対象 |
+
+> **Note**: CLI から直接実行する場合も、これらのパラメータを適切に指定してください。
+
 ### 位置調整パラメータ
 
 | パラメータ | 説明 | 値の由来 |
@@ -71,6 +84,10 @@ blender --background --python retarget_script2_12.py -- \
 > **重要**: `--hips-position` は**ソースアバター**（衣装元）の Hips 位置が渡されます。
 > これは `adjust_armature_hips_position()` 関数で使用されます。
 > 詳細は [hips-position の動作](#hips-position-の動作) を参照。
+
+> **座標系**: この値は **Blender 座標系**（Z-up, 右手系）で指定します。
+> Unity アドオンは内部で Blender 座標系に変換してからこの引数を渡しています。
+> 具体的には `armature_obj.matrix_world @ pose_bone.head` と同じ空間です。
 
 ### メッシュ関連パラメータ
 
@@ -324,6 +341,19 @@ Hip Offset: <Vector (0.0000, -0.0255, 0.0589)>
 | Hips 位置がずれる | チェーン処理の Step 1 で offset = 0 | 最終結果を確認（Step 2 で調整される） |
 | ポーズが適用されない | posediff JSON パスが不正 | config の `poseDataPath` を確認 |
 | 変形が適用されない | NPZ ファイルパスが不正 | config の `fieldDataPath` を確認 |
+
+### FBX 比較スクリプトについて
+
+`scripts/compare_fbx_hips.py` を使用して FBX ファイルの位置を比較できます。
+
+```bash
+blender --background --python scripts/compare_fbx_hips.py -- before.fbx after.fbx
+```
+
+> **注意**: このスクリプトは **FBX 内部のメッシュ/アーマチュア位置** を比較します。
+> Unity での **Prefab 配置問題**（Transform の位置・スケール）は直接検出できません。
+> Unity 上で位置がずれる場合は、FBX 比較結果だけでなく、
+> Prefab の Transform 設定や親オブジェクトのスケールも確認してください。
 
 ## 関連ドキュメント
 
