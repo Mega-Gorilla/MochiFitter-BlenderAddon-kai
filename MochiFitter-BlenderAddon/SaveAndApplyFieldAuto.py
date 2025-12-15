@@ -3929,6 +3929,10 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
         import re
 
         if event.type == 'TIMER':
+            # キャンセル後に Queue が None になっている場合はスキップ
+            if not self._queue:
+                return {'PASS_THROUGH'}
+
             # アニメーション更新
             self._dot_count = (self._dot_count + 1) % 4
             dots = "." * (self._dot_count + 1)
