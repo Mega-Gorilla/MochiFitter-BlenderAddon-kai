@@ -2395,6 +2395,42 @@ def process_base_avatar(base_fbx_path: str, avatar_data_path: str) -> tuple:
     
     return mesh_obj, armature_obj, avatar_data
 
+def get_hips_world_position_from_armature(armature_obj: bpy.types.Object, avatar_data: dict) -> Optional[Vector]:
+    """
+    armature から Hips ボーンのワールド位置を取得する。
+
+    チェーン処理時に base_armature から Hips 位置を自動計算するために使用。
+
+    Parameters:
+        armature_obj: アーマチュアオブジェクト
+        avatar_data: アバターデータ（humanoidBones を含む）
+
+    Returns:
+        Hips ボーンのワールド位置（Vector）、取得できない場合は None
+    """
+    if not armature_obj or armature_obj.type != 'ARMATURE':
+        return None
+
+    # avatar_data から Hips ボーン名を取得
+    hips_bone_name = None
+    for bone_map in avatar_data.get("humanoidBones", []):
+        if bone_map.get("humanoidBoneName") == "Hips":
+            hips_bone_name = bone_map.get("boneName")
+            break
+
+    if not hips_bone_name:
+        print("Warning: Hips bone not found in avatar_data")
+        return None
+
+    # pose_bones から Hips ボーンを取得
+    pose_bone = armature_obj.pose.bones.get(hips_bone_name)
+    if not pose_bone:
+        print(f"Warning: Bone '{hips_bone_name}' not found in armature")
+        return None
+
+    # Hips ボーンのワールド位置を計算して返す
+    return armature_obj.matrix_world @ pose_bone.head
+
 def adjust_armature_hips_position(armature_obj: bpy.types.Object, target_position: Vector, clothing_avatar_data: dict) -> None:
     """
     アーマチュアのHipsボーンを指定された位置に移動させる。
@@ -19927,9 +19963,17 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
         print("Status: ベースアバター処理中")
         print(f"Progress: {(pair_index + 0.1) / total_pairs * 0.9:.3f}")
         base_mesh, base_armature, base_avatar_data = process_base_avatar(
-            config_pair['base_fbx'], 
+            config_pair['base_fbx'],
             config_pair['base_avatar_data']
         )
+
+        # チェーン処理時の hips_position 自動計算 (Issue #15)
+        # config_pair['hips_position'] が None の場合、base_armature から Hips 位置を取得
+        if config_pair['hips_position'] is None:
+            auto_hips_position = get_hips_world_position_from_armature(base_armature, base_avatar_data)
+            if auto_hips_position:
+                config_pair['hips_position'] = auto_hips_position
+                print(f"Auto-calculated hips position from base armature: {auto_hips_position}")
 
         # Process clothing avatar
         print("Status: 衣装データ処理中")
