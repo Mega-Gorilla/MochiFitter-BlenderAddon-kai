@@ -4063,14 +4063,20 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
 
             # バックグラウンドスレッドで実行する関数
             def run_rbf_background():
+                # キャンセル時の競合を避けるため、Queue をローカル参照で保持
+                # （_cleanup() で self._queue = None になっても安全に動作）
+                q = self._queue
+
                 try:
                     # パスの存在確認
                     if not os.path.exists(python_path):
-                        self._queue.put(('ERROR', f"Pythonバイナリが見つかりません: {python_path}"))
+                        if q:
+                            q.put(('ERROR', f"Pythonバイナリが見つかりません: {python_path}"))
                         return
 
                     if not os.path.exists(processor_path):
-                        self._queue.put(('ERROR', f"RBFプロセッサスクリプトが見つかりません: {processor_path}"))
+                        if q:
+                            q.put(('ERROR', f"RBFプロセッサスクリプトが見つかりません: {processor_path}"))
                         return
 
                     # 環境変数を設定
@@ -4123,8 +4129,8 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
 
                     # stdout を読み取り、Queue に送信
                     for line in iter(self._process.stdout.readline, ''):
-                        if line:
-                            self._queue.put(('LOG', line.rstrip('\n\r')))
+                        if line and q:
+                            q.put(('LOG', line.rstrip('\n\r')))
 
                     # プロセス完了を待つ
                     self._process.wait()
@@ -4139,13 +4145,15 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                             if os.path.abspath(self._default_paths[1]) != os.path.abspath(inv_filepath):
                                 shutil.copy2(self._default_paths[1], inv_filepath)
 
-                    self._queue.put(('DONE', self._process.returncode))
+                    if q:
+                        q.put(('DONE', self._process.returncode))
 
                 except Exception as e:
                     error_msg = f"RBF処理中にエラーが発生しました: {str(e)}"
                     print(error_msg)
                     print(traceback.format_exc())
-                    self._queue.put(('ERROR', error_msg))
+                    if q:
+                        q.put(('ERROR', error_msg))
 
             # バックグラウンドスレッドを起動
             self._thread = threading.Thread(target=run_rbf_background)
