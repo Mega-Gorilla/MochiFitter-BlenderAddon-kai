@@ -438,13 +438,17 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
 
     # ProcessPoolExecutor 開始直前に BLAS スレッド数を制限
     # np.linalg.solve() は既に完了しているので、ここからは並列処理のオーバーサブスクライブ防止のため制限
-    blas_threads = '2'
-    os.environ['OMP_NUM_THREADS'] = blas_threads
-    os.environ['OPENBLAS_NUM_THREADS'] = blas_threads
-    os.environ['MKL_NUM_THREADS'] = blas_threads
-    os.environ['VECLIB_MAXIMUM_THREADS'] = blas_threads
-    os.environ['NUMEXPR_NUM_THREADS'] = blas_threads
-    print(f"BLAS スレッド数を {blas_threads} に制限しました（ProcessPoolExecutor 開始前）")
+    # max_workers == 1 の場合は制限不要（低メモリモード等で単一ワーカーの場合はフルスレッド活用）
+    if max_workers == 1:
+        print("単一ワーカーモード: BLAS スレッド制限なし（フルスレッド活用）")
+    else:
+        blas_threads = '2'
+        os.environ['OMP_NUM_THREADS'] = blas_threads
+        os.environ['OPENBLAS_NUM_THREADS'] = blas_threads
+        os.environ['MKL_NUM_THREADS'] = blas_threads
+        os.environ['VECLIB_MAXIMUM_THREADS'] = blas_threads
+        os.environ['NUMEXPR_NUM_THREADS'] = blas_threads
+        print(f"BLAS スレッド数を {blas_threads} に制限しました（ProcessPoolExecutor 開始前、ワーカー数: {max_workers}）")
     
     # マルチプロセス処理
     processed_count = 0
