@@ -142,11 +142,22 @@ phi = np.exp(-dist_matrix / (epsilon**2))
 
 ---
 
-#### P1-1: LU分解の再利用（3成分同時求解）
+#### P1-1: LU分解のステップ間キャッシュ
 
-**概要**: x, y, z 各成分の線形求解でLU分解を再利用
+**概要**: 複数ステップ処理時に行列Aの分解結果をキャッシュして再利用
 
-**期待効果**: 線形求解 60-65%高速化（27秒 → 10-12秒）
+**期待効果**: 複数ステップ処理時、2ステップ目以降の線形求解を大幅削減
+
+**現行実装の状況**:
+
+現在の `rbf_multithread_processor.py` では、x, y, z 成分を多RHS形式で一括処理している：
+```python
+b = np.zeros((num_pts + dim + 1, dim))  # dim=3 (x,y,z)
+b[:num_pts] = displacements
+x = np.linalg.solve(A, b)  # 1回の呼び出しで3成分同時求解
+```
+この形式では `np.linalg.solve()` 内部でLU分解が1回のみ行われるため、
+「3回分解している」という問題は**既に解決済み**。
 
 **理論的背景**:
 
@@ -162,38 +173,53 @@ A = [[phi, P ],
 この構造は**対称であるが正定値ではない**（ゼロブロックの存在により不定値）。
 したがって Cholesky 分解は適用不可。
 
-しかし、現在 x, y, z 成分ごとに3回 `np.linalg.solve()` を呼んでおり、
-毎回同じ行列 A の LU 分解を再計算している。**行列 A は共通**なので、
-LU 分解を1回行い、後方代入を3回行うことで大幅な高速化が可能。
+**最適化の主戦場: ステップ間キャッシュ**
+
+複数ステップ処理（複数アバター間の変形など）では、`source_control_points` と
+`epsilon` が同一であれば行列 A も同一になる。現状は各ステップで：
+- 距離行列計算: O(n²)
+- 行列A構築: O(n²)
+- LU分解: O(n³)
+
+を繰り返しているが、**LU分解結果をキャッシュ**することで2ステップ目以降は
+O(n²) の後方代入のみで済む。
 
 **実装箇所**: `rbf_multithread_processor.py`
 
 ```python
 import scipy.linalg
 
-# 変更前: 3回のsolve（各回でLU分解）
-weights_x = np.linalg.solve(A, b_x)  # LU分解 + 後方代入
-weights_y = np.linalg.solve(A, b_y)  # LU分解 + 後方代入
-weights_z = np.linalg.solve(A, b_z)  # LU分解 + 後方代入
+# グローバルまたはクラス変数としてキャッシュ
+_lu_cache = {}
 
-# 変更後: LU分解1回 + 後方代入3回
-lu, piv = scipy.linalg.lu_factor(A)  # LU分解1回のみ
-weights_x = scipy.linalg.lu_solve((lu, piv), b_x)
-weights_y = scipy.linalg.lu_solve((lu, piv), b_y)
-weights_z = scipy.linalg.lu_solve((lu, piv), b_z)
+def get_or_compute_lu(A, cache_key):
+    """
+    LU分解結果をキャッシュから取得、なければ計算してキャッシュ
+    """
+    if cache_key in _lu_cache:
+        print(f"LU分解キャッシュヒット: {cache_key}")
+        return _lu_cache[cache_key]
 
-# または、右辺を結合して一度に求解
-B = np.column_stack([b_x, b_y, b_z])  # (n+4, 3)
-weights = scipy.linalg.lu_solve((lu, piv), B)  # (n+4, 3)
-weights_x, weights_y, weights_z = weights[:, 0], weights[:, 1], weights[:, 2]
+    print(f"LU分解を計算中...")
+    lu, piv = scipy.linalg.lu_factor(A)
+    _lu_cache[cache_key] = (lu, piv)
+    return lu, piv
+
+def solve_with_cached_lu(A, b, source_points_hash, epsilon):
+    """
+    キャッシュを活用した線形求解
+    """
+    cache_key = (source_points_hash, epsilon)
+    lu, piv = get_or_compute_lu(A, cache_key)
+    return scipy.linalg.lu_solve((lu, piv), b)
 ```
 
-**計算量の比較**:
-- 変更前: LU分解 O(n³) × 3回 = O(3n³)
-- 変更後: LU分解 O(n³) × 1回 + 後方代入 O(n²) × 3回 ≈ O(n³)
-- n=15,783 の場合、約66%の計算量削減
+**期待効果**:
+- 単一ステップ: 効果なし（現状と同じ）
+- 2ステップ: 線形求解 ~50%削減（27秒 → 27 + 1 = 28秒、vs 27×2 = 54秒）
+- Nステップ: 線形求解 (N-1)/N の削減
 
-**リスク**: 極低（既存ロジックの単純な最適化）
+**リスク**: 低（メモリ使用量増加、キャッシュ無効化ロジック必要）
 
 ---
 
@@ -438,7 +464,7 @@ Week 1-2 (Quick Wins):
 └─ [ ] 単体テスト・回帰テスト
 
 Week 3-4 (Core Optimization):
-├─ [ ] P1-1: Cholesky分解適用
+├─ [ ] P1-1: LU分解のステップ間キャッシュ
 ├─ [ ] P1-2: バッチサイズ動的最適化
 ├─ [ ] 統合テスト
 └─ [ ] パフォーマンス測定
