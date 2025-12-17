@@ -21,7 +21,7 @@ import sys
 import time
 import argparse
 import traceback
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from scipy.spatial.distance import cdist
 from scipy.spatial import KDTree
 from scipy.sparse import csc_matrix
@@ -239,6 +239,11 @@ def cdist_fast(A: np.ndarray, B: np.ndarray, metric: str = 'sqeuclidean') -> np.
 
 # GMRES使用フラグ（実験的機能、デフォルトは無効）
 USE_GMRES_SOLVER = False
+
+# ハイブリッド並列化フラグ（P2-3）
+# True: RBF評価でThreadPoolExecutorを使用（NumPyがGILを解放する操作で効果的）
+# False: 従来のProcessPoolExecutorを使用（デフォルト、安定性重視）
+USE_HYBRID_PARALLELIZATION = False
 
 
 def solve_with_gmres(A: np.ndarray, b: np.ndarray, tol: float = 1e-6,
@@ -547,7 +552,51 @@ def process_vertex_batch(batch_data: Dict[str, Any]) -> Tuple[int, int, np.ndarr
         del batch_dists, batch_phi, batch_P
         
         return start_idx, end_idx, batch_displacements
-        
+
+    except Exception as e:
+        print(f"バッチ処理中にエラーが発生: {e}")
+        raise
+
+
+def process_vertex_batch_thread(args: Tuple) -> Tuple[int, int, np.ndarray]:
+    """
+    頂点のバッチを処理する関数（ThreadPoolExecutor用）
+
+    ThreadPoolExecutorはメモリを共有するため、大きな配列をコピーせずに
+    参照渡しで効率的に処理できます。NumPyのBLAS操作はGILを解放するため、
+    ThreadPoolExecutorでも並列性能が得られます。
+
+    Parameters:
+        args: (start_idx, end_idx, target_world_vertices, source_control_points,
+               rbf_weights, poly_weights, epsilon, dim)
+
+    Returns:
+        Tuple[start_idx, end_idx, displacements]
+    """
+    (start_idx, end_idx, target_world_vertices, source_control_points,
+     rbf_weights, poly_weights, epsilon, dim) = args
+
+    batch_world_vertices = target_world_vertices[start_idx:end_idx]
+    current_batch_size = end_idx - start_idx
+
+    try:
+        # ターゲット頂点と制御点の間の距離を計算
+        # Numba利用可能時はJIT版を使用（3-5倍高速化）
+        batch_dists = cdist_fast(batch_world_vertices, source_control_points, 'sqeuclidean')
+        batch_phi = np.sqrt(batch_dists + DEFAULT_DTYPE(epsilon**2))
+
+        # 多項式項の計算（DEFAULT_DTYPEに統一）
+        batch_P = np.ones((current_batch_size, dim + 1), dtype=DEFAULT_DTYPE)
+        batch_P[:, 1:] = batch_world_vertices
+
+        # 各ターゲット頂点の変位を計算
+        batch_displacements = np.dot(batch_phi, rbf_weights) + np.dot(batch_P, poly_weights)
+
+        # メモリ解放
+        del batch_dists, batch_phi, batch_P
+
+        return start_idx, end_idx, batch_displacements
+
     except Exception as e:
         print(f"バッチ処理中にエラーが発生: {e}")
         raise
@@ -687,70 +736,122 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
     # 結果を格納する配列を初期化
     target_displacements = np.zeros_like(target_world_vertices, dtype=DEFAULT_DTYPE)
     
-    # バッチデータを準備
-    batch_tasks = []
-    for batch_start in range(0, total_vertices, batch_size):
-        batch_end = min(batch_start + batch_size, total_vertices)
-        batch_world_vertices = target_world_vertices[batch_start:batch_end].copy()  # コピーを作成
-        
-        batch_data = {
-            'start_idx': batch_start,
-            'end_idx': batch_end,
-            'batch_world_vertices': batch_world_vertices,
-            'source_control_points': source_control_points,
-            'rbf_weights': rbf_weights,
-            'poly_weights': poly_weights,
-            'epsilon': epsilon,
-            'dim': dim
-        }
-        batch_tasks.append(batch_data)
-    
-    print(f"ターゲットメッシュの頂点を {len(batch_tasks)} バッチでマルチプロセス処理します（全 {total_vertices} 頂点）")
+    # ハイブリッド並列化（P2-3）: ThreadPoolExecutor or ProcessPoolExecutor
+    if USE_HYBRID_PARALLELIZATION:
+        # ThreadPoolExecutor用: タプル形式のバッチタスク
+        # メモリ共有が可能なため、データをコピーせず参照を渡す
+        batch_tasks_thread = []
+        for batch_start in range(0, total_vertices, batch_size):
+            batch_end = min(batch_start + batch_size, total_vertices)
+            # タプル形式: (start_idx, end_idx, target_world_vertices, source_control_points,
+            #              rbf_weights, poly_weights, epsilon, dim)
+            batch_tasks_thread.append((
+                batch_start, batch_end, target_world_vertices, source_control_points,
+                rbf_weights, poly_weights, epsilon, dim
+            ))
 
-    # ProcessPoolExecutor 開始直前に BLAS スレッド数を制限
-    # np.linalg.solve() は既に完了しているので、ここからは並列処理のオーバーサブスクライブ防止のため制限
-    # max_workers == 1 の場合は制限不要（低メモリモード等で単一ワーカーの場合はフルスレッド活用）
-    if max_workers == 1:
-        print("単一ワーカーモード: BLAS スレッド制限なし（フルスレッド活用）")
+        # ThreadPoolExecutorはNumPy BLAS操作でGILを解放するため並列性が得られる
+        # ただし、Numba JIT関数はGILを保持する場合があるため注意
+        thread_workers = max_workers * 2  # スレッドはプロセスより軽量なので多めに
+        print(f"ターゲットメッシュの頂点を {len(batch_tasks_thread)} バッチで"
+              f"ThreadPool処理します（全 {total_vertices} 頂点, ワーカー数: {thread_workers}）")
+        print("ハイブリッド並列化モード: ThreadPoolExecutor（NumPy GIL解放活用）")
+
+        processed_count = 0
+        with ThreadPoolExecutor(max_workers=thread_workers) as executor:
+            future_to_idx = {executor.submit(process_vertex_batch_thread, task): task[0]
+                            for task in batch_tasks_thread}
+
+            for future in as_completed(future_to_idx):
+                try:
+                    start_idx, end_idx, batch_displacements = future.result()
+                    target_displacements[start_idx:end_idx] = batch_displacements
+
+                    processed_count += (end_idx - start_idx)
+                    progress_percent = (processed_count / total_vertices) * 100
+
+                    if processed_count % (batch_size * 20) == 0 or processed_count == total_vertices:
+                        if memory_monitor.enabled:
+                            current_memory = memory_monitor.get_memory_usage()
+                            print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 "
+                                  f"({progress_percent:.1f}%) [メモリ: {current_memory:.1f}GB]")
+                        else:
+                            print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%)")
+
+                except Exception as exc:
+                    batch_start_idx = future_to_idx[future]
+                    print(f"バッチ開始位置 {batch_start_idx} でエラーが発生: {exc}")
+                    print("スタックトレース:")
+                    traceback.print_exc()
+                    raise exc
+
+        print("ThreadPool処理が完了しました")
+
     else:
-        blas_threads = '2'
-        os.environ['OMP_NUM_THREADS'] = blas_threads
-        os.environ['OPENBLAS_NUM_THREADS'] = blas_threads
-        os.environ['MKL_NUM_THREADS'] = blas_threads
-        os.environ['VECLIB_MAXIMUM_THREADS'] = blas_threads
-        os.environ['NUMEXPR_NUM_THREADS'] = blas_threads
-        print(f"BLAS スレッド数を {blas_threads} に制限しました（ProcessPoolExecutor 開始前、ワーカー数: {max_workers}）")
-    
-    # マルチプロセス処理
-    processed_count = 0
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        # バッチを並列処理
-        future_to_batch = {executor.submit(process_vertex_batch, batch_data): batch_data for batch_data in batch_tasks}
-        
-        for future in as_completed(future_to_batch):
-            try:
-                start_idx, end_idx, batch_displacements = future.result()
-                target_displacements[start_idx:end_idx] = batch_displacements
-                
-                processed_count += (end_idx - start_idx)
-                progress_percent = (processed_count / total_vertices) * 100
-                
-                # プロセスプールでの進捗表示（メモリ監視は各プロセスで独立）
-                if processed_count % (batch_size * 20) == 0 or processed_count == total_vertices:
-                    if memory_monitor.enabled:
-                        current_memory = memory_monitor.get_memory_usage()
-                        print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%) [メインプロセスメモリ: {current_memory:.1f}GB]")
-                    else:
-                        print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%)")
-                
-            except Exception as exc:
-                batch_data = future_to_batch[future]
-                print(f"バッチ {batch_data['start_idx']}-{batch_data['end_idx']} でエラーが発生: {exc}")
-                print("スタックトレース:")
-                traceback.print_exc()
-                raise exc
-    
-    print("マルチプロセス処理が完了しました")
+        # ProcessPoolExecutor用: 辞書形式のバッチタスク（従来方式）
+        batch_tasks = []
+        for batch_start in range(0, total_vertices, batch_size):
+            batch_end = min(batch_start + batch_size, total_vertices)
+            batch_world_vertices = target_world_vertices[batch_start:batch_end].copy()  # コピーを作成
+
+            batch_data = {
+                'start_idx': batch_start,
+                'end_idx': batch_end,
+                'batch_world_vertices': batch_world_vertices,
+                'source_control_points': source_control_points,
+                'rbf_weights': rbf_weights,
+                'poly_weights': poly_weights,
+                'epsilon': epsilon,
+                'dim': dim
+            }
+            batch_tasks.append(batch_data)
+
+        print(f"ターゲットメッシュの頂点を {len(batch_tasks)} バッチでマルチプロセス処理します（全 {total_vertices} 頂点）")
+
+        # ProcessPoolExecutor 開始直前に BLAS スレッド数を制限
+        # np.linalg.solve() は既に完了しているので、ここからは並列処理のオーバーサブスクライブ防止のため制限
+        # max_workers == 1 の場合は制限不要（低メモリモード等で単一ワーカーの場合はフルスレッド活用）
+        if max_workers == 1:
+            print("単一ワーカーモード: BLAS スレッド制限なし（フルスレッド活用）")
+        else:
+            blas_threads = '2'
+            os.environ['OMP_NUM_THREADS'] = blas_threads
+            os.environ['OPENBLAS_NUM_THREADS'] = blas_threads
+            os.environ['MKL_NUM_THREADS'] = blas_threads
+            os.environ['VECLIB_MAXIMUM_THREADS'] = blas_threads
+            os.environ['NUMEXPR_NUM_THREADS'] = blas_threads
+            print(f"BLAS スレッド数を {blas_threads} に制限しました（ProcessPoolExecutor 開始前、ワーカー数: {max_workers}）")
+
+        # マルチプロセス処理
+        processed_count = 0
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # バッチを並列処理
+            future_to_batch = {executor.submit(process_vertex_batch, batch_data): batch_data for batch_data in batch_tasks}
+
+            for future in as_completed(future_to_batch):
+                try:
+                    start_idx, end_idx, batch_displacements = future.result()
+                    target_displacements[start_idx:end_idx] = batch_displacements
+
+                    processed_count += (end_idx - start_idx)
+                    progress_percent = (processed_count / total_vertices) * 100
+
+                    # プロセスプールでの進捗表示（メモリ監視は各プロセスで独立）
+                    if processed_count % (batch_size * 20) == 0 or processed_count == total_vertices:
+                        if memory_monitor.enabled:
+                            current_memory = memory_monitor.get_memory_usage()
+                            print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%) [メインプロセスメモリ: {current_memory:.1f}GB]")
+                        else:
+                            print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%)")
+
+                except Exception as exc:
+                    batch_data = future_to_batch[future]
+                    print(f"バッチ {batch_data['start_idx']}-{batch_data['end_idx']} でエラーが発生: {exc}")
+                    print("スタックトレース:")
+                    traceback.print_exc()
+                    raise exc
+
+        print("マルチプロセス処理が完了しました")
 
     # フォールオフ処理を適用
     print("フォールオフ処理を適用中...")
@@ -1090,8 +1191,19 @@ def main():
                        help='低メモリモード（バッチサイズとワーカー数を自動的に制限）')
     parser.add_argument('--old-version', action='store_true',
                        help='旧バージョン形式で保存（互換性のため）')
-    
+    parser.add_argument('--use-threadpool', action='store_true',
+                       help='ハイブリッド並列化: RBF評価でThreadPoolExecutorを使用（実験的）')
+    parser.add_argument('--use-gmres', action='store_true',
+                       help='GMRES反復ソルバーを使用（実験的、収束しない場合は直接法にフォールバック）')
+
     args = parser.parse_args()
+
+    # 実験的機能フラグの設定
+    global USE_HYBRID_PARALLELIZATION, USE_GMRES_SOLVER
+    if args.use_threadpool:
+        USE_HYBRID_PARALLELIZATION = True
+    if args.use_gmres:
+        USE_GMRES_SOLVER = True
 
     if PSUTIL_AVAILABLE:
         set_cpu_affinity()
@@ -1106,12 +1218,15 @@ def main():
     
     print(f"CPU数: {os.cpu_count()}")
     print(f"Numba JIT: {'有効（距離計算高速化）' if NUMBA_AVAILABLE else '無効（pip install numba で有効化可能）'}")
+    print(f"GMRES反復ソルバー: {'有効（--use-gmres）' if USE_GMRES_SOLVER else '無効'}")
+    print(f"ハイブリッド並列化: {'有効（--use-threadpool）' if USE_HYBRID_PARALLELIZATION else '無効（ProcessPoolExecutor）'}")
     # 注意: BLAS スレッド制限は ProcessPoolExecutor 開始直前に行う
     # 線形システム求解（np.linalg.solve）は ProcessPoolExecutor 前に実行されるため、
     # ここでは制限せず、multiprocess_rbf_interpolation() 内で制限する
     # これにより線形システム求解のパフォーマンスを維持しつつ、
     # ProcessPoolExecutor でのオーバーサブスクライブを防ぐ
-    print("BLAS スレッド数: 線形システム求解後に制限予定")
+    if not USE_HYBRID_PARALLELIZATION:
+        print("BLAS スレッド数: 線形システム求解後に制限予定")
     
     np.__config__.show()
     
