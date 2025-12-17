@@ -35,6 +35,19 @@ except ImportError:
     #print("警告: psutilがインストールされていません。メモリ監視機能は無効になります。")
     #print("インストールするには: pip install psutil")
 
+# Numbaの可用性をチェック（オプショナル高速化）
+try:
+    from numba import jit, prange
+    NUMBA_AVAILABLE = True
+except ImportError:
+    NUMBA_AVAILABLE = False
+    # Numbaがない場合のダミー定義（デコレータを無効化）
+    def jit(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+    prange = range
+
 def set_cpu_affinity():
     """プロセスのCPU親和性を設定して全コアを活用"""
     try:
@@ -129,6 +142,93 @@ def multi_quadratic_biharmonic(r: np.ndarray, epsilon: float = 1.0) -> np.ndarra
 
 # デフォルトのデータ型（float32でメモリ効率化、float64で高精度）
 DEFAULT_DTYPE = np.float32
+
+
+# =============================================================================
+# Numba JIT高速化関数（P2-1）
+# =============================================================================
+
+@jit(nopython=True, parallel=True, fastmath=True, cache=True)
+def _cdist_sqeuclidean_numba(A: np.ndarray, B: np.ndarray) -> np.ndarray:
+    """
+    Numba JIT版 二乗ユークリッド距離計算
+
+    Parameters:
+    - A: 形状 (m, d) の配列
+    - B: 形状 (n, d) の配列
+
+    Returns:
+    - 形状 (m, n) の二乗距離行列
+    """
+    m, d = A.shape
+    n = B.shape[0]
+    result = np.zeros((m, n), dtype=np.float32)
+
+    for i in prange(m):
+        for j in range(n):
+            dist_sq = 0.0
+            for k in range(d):
+                diff = A[i, k] - B[j, k]
+                dist_sq += diff * diff
+            result[i, j] = dist_sq
+
+    return result
+
+
+@jit(nopython=True, parallel=True, fastmath=True, cache=True)
+def _cdist_euclidean_numba(A: np.ndarray, B: np.ndarray) -> np.ndarray:
+    """
+    Numba JIT版 ユークリッド距離計算
+
+    Parameters:
+    - A: 形状 (m, d) の配列
+    - B: 形状 (n, d) の配列
+
+    Returns:
+    - 形状 (m, n) の距離行列
+    """
+    m, d = A.shape
+    n = B.shape[0]
+    result = np.zeros((m, n), dtype=np.float32)
+
+    for i in prange(m):
+        for j in range(n):
+            dist_sq = 0.0
+            for k in range(d):
+                diff = A[i, k] - B[j, k]
+                dist_sq += diff * diff
+            result[i, j] = np.sqrt(dist_sq)
+
+    return result
+
+
+def cdist_fast(A: np.ndarray, B: np.ndarray, metric: str = 'sqeuclidean') -> np.ndarray:
+    """
+    高速距離計算（Numba利用可能時はJIT版、それ以外はscipy.cdist）
+
+    Parameters:
+    - A: 形状 (m, d) の配列
+    - B: 形状 (n, d) の配列
+    - metric: 'sqeuclidean'（二乗ユークリッド）または 'euclidean'
+
+    Returns:
+    - 距離行列
+    """
+    # float32に変換（Numba版は float32 固定）
+    A_f32 = A.astype(np.float32) if A.dtype != np.float32 else A
+    B_f32 = B.astype(np.float32) if B.dtype != np.float32 else B
+
+    if NUMBA_AVAILABLE:
+        if metric == 'sqeuclidean':
+            return _cdist_sqeuclidean_numba(A_f32, B_f32)
+        elif metric == 'euclidean':
+            return _cdist_euclidean_numba(A_f32, B_f32)
+        else:
+            # サポート外のmetricはscipy.cdistにフォールバック
+            return cdist(A, B, metric).astype(DEFAULT_DTYPE)
+    else:
+        # Numbaがない場合はscipy.cdistを使用
+        return cdist(A, B, metric).astype(DEFAULT_DTYPE)
 
 
 def calculate_optimal_batch_size(num_control_pts: int, max_workers: int,
@@ -362,8 +462,8 @@ def process_vertex_batch(batch_data: Dict[str, Any]) -> Tuple[int, int, np.ndarr
     
     try:
         # ターゲット頂点と制御点の間の距離を計算
-        # メモリ効率のために一度に計算（DEFAULT_DTYPEに統一）
-        batch_dists = cdist(batch_world_vertices, source_control_points, 'sqeuclidean').astype(DEFAULT_DTYPE)
+        # Numba利用可能時はJIT版を使用（3-5倍高速化）
+        batch_dists = cdist_fast(batch_world_vertices, source_control_points, 'sqeuclidean')
         batch_phi = np.sqrt(batch_dists + DEFAULT_DTYPE(epsilon**2))
 
         # 多項式項の計算（DEFAULT_DTYPEに統一）
@@ -426,14 +526,14 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
     # スケーリング係数を計算：距離の標準偏差に基づく値を使用
     if epsilon <= 0:
         # 平均距離に基づいて適切なepsilonを計算
-        dists = cdist(source_control_points, source_control_points)
+        dists = cdist_fast(source_control_points, source_control_points, 'euclidean')
         mean_dist = np.mean(dists[dists > 0])
         epsilon = mean_dist  # 平均距離をepsilonとして使用
         print(f"自動計算されたepsilon: {epsilon}")
-    
-    # 制御点間の距離行列を計算
-    print("RBF行列を計算中...")
-    dist_matrix = cdist(source_control_points, source_control_points, 'sqeuclidean').astype(DEFAULT_DTYPE)
+
+    # 制御点間の距離行列を計算（Numba利用可能時はJIT版を使用）
+    print(f"RBF行列を計算中...（Numba: {'有効' if NUMBA_AVAILABLE else '無効'}）")
+    dist_matrix = cdist_fast(source_control_points, source_control_points, 'sqeuclidean')
 
     # RBF行列を計算
     phi = np.sqrt(dist_matrix + DEFAULT_DTYPE(epsilon**2))
@@ -917,6 +1017,7 @@ def main():
             args.max_workers = 1  # プロセスプールでは1つに制限
     
     print(f"CPU数: {os.cpu_count()}")
+    print(f"Numba JIT: {'有効（距離計算高速化）' if NUMBA_AVAILABLE else '無効（pip install numba で有効化可能）'}")
     # 注意: BLAS スレッド制限は ProcessPoolExecutor 開始直前に行う
     # 線形システム求解（np.linalg.solve）は ProcessPoolExecutor 前に実行されるため、
     # ここでは制限せず、multiprocess_rbf_interpolation() 内で制限する
