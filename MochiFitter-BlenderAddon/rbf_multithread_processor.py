@@ -131,6 +131,54 @@ def multi_quadratic_biharmonic(r: np.ndarray, epsilon: float = 1.0) -> np.ndarra
 DEFAULT_DTYPE = np.float32
 
 
+def calculate_optimal_batch_size(num_control_pts: int, max_workers: int,
+                                  available_memory_gb: float = None) -> int:
+    """
+    メモリ制約を考慮した最適バッチサイズ計算
+
+    Parameters:
+    - num_control_pts: 制御点の数
+    - max_workers: ワーカー数
+    - available_memory_gb: 利用可能メモリ（GB）、Noneの場合は自動検出
+
+    Returns:
+    - 最適なバッチサイズ
+    """
+    # 利用可能メモリを取得
+    if available_memory_gb is None:
+        if PSUTIL_AVAILABLE:
+            available_memory_gb = psutil.virtual_memory().available / 1024**3
+        else:
+            available_memory_gb = 8.0  # デフォルト8GB
+
+    # バッチあたりメモリ使用量の推定
+    # - 距離行列: batch_size × num_control_pts × 4 bytes (float32)
+    # - RBF値: batch_size × num_control_pts × 4 bytes (float32)
+    # - 多項式項: batch_size × 4 × 4 bytes (float32)
+    # - 結果: batch_size × 3 × 4 bytes (float32)
+    bytes_per_vertex = num_control_pts * 4 * 2 + 4 * 4 + 3 * 4  # float32基準
+
+    # 利用可能メモリの50%を使用（安全マージン、他の処理用に余裕を持たせる）
+    target_bytes = available_memory_gb * 0.5 * 1024**3
+
+    # ワーカー数で分割
+    bytes_per_worker = target_bytes / max(1, max_workers)
+
+    # 最適バッチサイズを計算
+    optimal_batch = int(bytes_per_worker / bytes_per_vertex)
+
+    # 上限・下限の設定
+    # - 下限1000: 小さすぎると通信オーバーヘッドが増加
+    # - 上限20000: 大きすぎるとメモリ断片化のリスク
+    result = max(1000, min(optimal_batch, 20000))
+
+    print(f"バッチサイズを動的計算: "
+          f"制御点数={num_control_pts}, ワーカー数={max_workers}, "
+          f"利用可能メモリ={available_memory_gb:.1f}GB → batch_size={result}")
+
+    return result
+
+
 def smooth_step(x: np.ndarray, edge0: float, edge1: float) -> np.ndarray:
     """
     Performs smooth Hermite interpolation between 0 and 1 when edge0 < x < edge1.
@@ -558,7 +606,19 @@ def process_temp_file(temp_file_path: str, max_workers: int = None, old_version:
         print(f"  ステップ {step+1} フィールド頂点数: {len(all_field_world_vertices[step])}")
     print(f"  逆変形: {invert}")
     print(f"  Epsilon: {epsilon}")
-    
+
+    # 最適なワーカー数を計算（最初のステップのデータを使用）
+    first_step_data = all_step_data[0]
+    num_control_pts = len(first_step_data['control_points_original'])
+    total_vertices = len(all_field_world_vertices[0])
+    memory_monitor = MemoryMonitor()
+    if max_workers is None:
+        max_workers = get_optimal_worker_count(total_vertices, memory_monitor)
+
+    # 最適なバッチサイズを計算（全ステップで共通）
+    optimal_batch_size = calculate_optimal_batch_size(num_control_pts, max_workers)
+    print(f"  最適バッチサイズ: {optimal_batch_size}")
+
     # 各ステップの変位を計算
     all_displacements = []
     all_target_world_vertices = []
@@ -586,13 +646,13 @@ def process_temp_file(temp_file_path: str, max_workers: int = None, old_version:
         max_disp = np.max(np.linalg.norm(displacements, axis=1))
         print(f"制御点の最大変位: {max_disp}")
 
-        # マルチプロセスRBF補間を実行（メモリ効率化のためバッチサイズを調整）
+        # マルチプロセスRBF補間を実行（動的最適化されたバッチサイズを使用）
         target_displacements, final_displacements = rbf_interpolation_multithread(
-            source_control_points, 
-            source_control_points_deformed, 
+            source_control_points,
+            source_control_points_deformed,
             current_field_vertices,
             epsilon,
-            batch_size=1000,  # メモリ効率化のためバッチサイズを削減
+            batch_size=optimal_batch_size,
             max_workers=max_workers
         )
         
