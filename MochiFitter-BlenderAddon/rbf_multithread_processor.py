@@ -21,9 +21,11 @@ import sys
 import time
 import argparse
 import traceback
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from scipy.spatial.distance import cdist
 from scipy.spatial import KDTree
+from scipy.sparse import csc_matrix  # 将来のコンパクト台RBF用（現在未使用）
+from scipy.sparse.linalg import gmres, LinearOperator  # spilu は対角前処理に変更のため削除
 from typing import Tuple, List, Dict, Any
 
 # psutilの可用性をチェック
@@ -34,6 +36,19 @@ except ImportError:
     PSUTIL_AVAILABLE = False
     #print("警告: psutilがインストールされていません。メモリ監視機能は無効になります。")
     #print("インストールするには: pip install psutil")
+
+# Numbaの可用性をチェック（オプショナル高速化）
+try:
+    from numba import jit, prange
+    NUMBA_AVAILABLE = True
+except ImportError:
+    NUMBA_AVAILABLE = False
+    # Numbaがない場合のダミー定義（デコレータを無効化）
+    def jit(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+    prange = range
 
 def set_cpu_affinity():
     """プロセスのCPU親和性を設定して全コアを活用"""
@@ -129,6 +144,197 @@ def multi_quadratic_biharmonic(r: np.ndarray, epsilon: float = 1.0) -> np.ndarra
 
 # デフォルトのデータ型（float32でメモリ効率化、float64で高精度）
 DEFAULT_DTYPE = np.float32
+
+
+# =============================================================================
+# Numba JIT高速化関数（P2-1）
+# =============================================================================
+
+@jit(nopython=True, parallel=True, fastmath=True, cache=True, nogil=True)
+def _cdist_sqeuclidean_numba(A: np.ndarray, B: np.ndarray) -> np.ndarray:
+    """
+    Numba JIT版 二乗ユークリッド距離計算
+
+    Parameters:
+    - A: 形状 (m, d) の配列
+    - B: 形状 (n, d) の配列
+
+    Returns:
+    - 形状 (m, n) の二乗距離行列
+
+    Note:
+        nogil=True により、GILを解放して実行します。
+        ThreadPoolExecutorとの併用時も並列性能が得られます。
+    """
+    m, d = A.shape
+    n = B.shape[0]
+    result = np.zeros((m, n), dtype=np.float32)
+
+    for i in prange(m):
+        for j in range(n):
+            dist_sq = 0.0
+            for k in range(d):
+                diff = A[i, k] - B[j, k]
+                dist_sq += diff * diff
+            result[i, j] = dist_sq
+
+    return result
+
+
+@jit(nopython=True, parallel=True, fastmath=True, cache=True, nogil=True)
+def _cdist_euclidean_numba(A: np.ndarray, B: np.ndarray) -> np.ndarray:
+    """
+    Numba JIT版 ユークリッド距離計算
+
+    Parameters:
+    - A: 形状 (m, d) の配列
+    - B: 形状 (n, d) の配列
+
+    Returns:
+    - 形状 (m, n) の距離行列
+
+    Note:
+        nogil=True により、GILを解放して実行します。
+        ThreadPoolExecutorとの併用時も並列性能が得られます。
+    """
+    m, d = A.shape
+    n = B.shape[0]
+    result = np.zeros((m, n), dtype=np.float32)
+
+    for i in prange(m):
+        for j in range(n):
+            dist_sq = 0.0
+            for k in range(d):
+                diff = A[i, k] - B[j, k]
+                dist_sq += diff * diff
+            result[i, j] = np.sqrt(dist_sq)
+
+    return result
+
+
+def cdist_fast(A: np.ndarray, B: np.ndarray, metric: str = 'sqeuclidean') -> np.ndarray:
+    """
+    高速距離計算（Numba利用可能時はJIT版、それ以外はscipy.cdist）
+
+    Parameters:
+    - A: 形状 (m, d) の配列
+    - B: 形状 (n, d) の配列
+    - metric: 'sqeuclidean'（二乗ユークリッド）または 'euclidean'
+
+    Returns:
+    - 距離行列（float32）
+
+    Note:
+        この関数は常にfloat32を返します（Numba経路・scipy経路共通）。
+        - Numba JIT版: 内部でfloat32固定（パフォーマンス最適化）
+        - scipy.cdist版: 結果をDEFAULT_DTYPE（通常float32）にキャスト
+
+        将来DEFAULT_DTYPE=float64を許容する場合は、Numba経路の精度制限に注意。
+    """
+    # float32に変換（Numba版は float32 固定、精度よりパフォーマンス重視）
+    A_f32 = A.astype(np.float32) if A.dtype != np.float32 else A
+    B_f32 = B.astype(np.float32) if B.dtype != np.float32 else B
+
+    if NUMBA_AVAILABLE:
+        if metric == 'sqeuclidean':
+            return _cdist_sqeuclidean_numba(A_f32, B_f32)
+        elif metric == 'euclidean':
+            return _cdist_euclidean_numba(A_f32, B_f32)
+        else:
+            # サポート外のmetricはscipy.cdistにフォールバック
+            return cdist(A, B, metric).astype(DEFAULT_DTYPE)
+    else:
+        # Numbaがない場合はscipy.cdistを使用
+        return cdist(A, B, metric).astype(DEFAULT_DTYPE)
+
+
+# =============================================================================
+# GMRES反復ソルバー（P2-2）
+# =============================================================================
+
+# GMRES使用フラグ（実験的機能、デフォルトは無効）
+USE_GMRES_SOLVER = False
+
+# ハイブリッド並列化フラグ（P2-3）
+# True: RBF評価でThreadPoolExecutorを使用（NumPyがGILを解放する操作で効果的）
+# False: 従来のProcessPoolExecutorを使用（デフォルト、安定性重視）
+USE_HYBRID_PARALLELIZATION = False
+
+
+# GMRES使用時の行列サイズ上限（密行列の疎行列変換はメモリ・時間的に非現実的）
+# コンパクト台RBF導入後に緩和可能
+GMRES_MAX_MATRIX_SIZE = 5000
+
+
+def solve_with_gmres(A: np.ndarray, b: np.ndarray, tol: float = 1e-6,
+                     maxiter: int = 500, restart: int = 100) -> Tuple[np.ndarray, bool]:
+    """
+    GMRES反復ソルバー（対角前処理）
+
+    Parameters:
+    - A: 係数行列 (n, n)
+    - b: 右辺ベクトル/行列 (n,) or (n, m)
+    - tol: 収束許容誤差
+    - maxiter: 最大反復回数
+    - restart: リスタート間隔
+
+    Returns:
+    - x: 解ベクトル/行列
+    - success: 収束したかどうか
+
+    Note:
+        現在のRBF行列は密行列のため、ILU前処理ではなく対角前処理を使用します。
+        - 密行列をcsc_matrixに変換してspiluすると、非ゼロ要素がほぼ全てになり
+          メモリ・時間の観点で破綻します（n≈15,783でA要素数≈2.5e8）
+        - コンパクト台RBF導入後（Aが疎になる場合）はILU前処理が効果的です
+
+        行列サイズがGMRES_MAX_MATRIX_SIZEを超える場合は即座にフォールバックします。
+    """
+    n = A.shape[0]
+    b_is_matrix = b.ndim == 2
+
+    # 密行列サイズガード: 大きすぎる場合は即フォールバック
+    if n > GMRES_MAX_MATRIX_SIZE:
+        print(f"GMRES: 行列サイズ {n} が上限 {GMRES_MAX_MATRIX_SIZE} を超過 - 直接法にフォールバック")
+        print(f"  (密行列の疎行列変換は n>{GMRES_MAX_MATRIX_SIZE} でメモリ・時間的に非現実的)")
+        return None, False
+
+    try:
+        # 対角前処理（密行列に対して安全かつ効果的）
+        # ILU前処理は密行列では非現実的なため使用しない
+        diag = np.diag(A)
+        # ゼロ除算を避けるため、小さい対角要素を1に置換
+        diag = np.where(np.abs(diag) < 1e-10, 1.0, diag)
+
+        # 対角前処理: M^{-1} = diag(A)^{-1}
+        # 密行列に対して安全で、ILUより軽量
+        diag_inv = 1.0 / diag
+
+        def preconditioner(x):
+            return diag_inv * x
+
+        M = LinearOperator((n, n), matvec=preconditioner, dtype=A.dtype)
+
+        if b_is_matrix:
+            # 複数の右辺ベクトルを持つ場合（x, y, z成分）
+            m = b.shape[1]
+            x = np.zeros_like(b)
+            all_converged = True
+
+            for i in range(m):
+                x_i, info = gmres(A, b[:, i], M=M, tol=tol, restart=restart, maxiter=maxiter)
+                x[:, i] = x_i
+                if info != 0:
+                    all_converged = False
+
+            return x, all_converged
+        else:
+            x, info = gmres(A, b, M=M, tol=tol, restart=restart, maxiter=maxiter)
+            return x, (info == 0)
+
+    except Exception as e:
+        print(f"GMRES処理中にエラー: {e}")
+        return None, False
 
 
 def calculate_optimal_batch_size(num_control_pts: int, max_workers: int,
@@ -362,8 +568,8 @@ def process_vertex_batch(batch_data: Dict[str, Any]) -> Tuple[int, int, np.ndarr
     
     try:
         # ターゲット頂点と制御点の間の距離を計算
-        # メモリ効率のために一度に計算（DEFAULT_DTYPEに統一）
-        batch_dists = cdist(batch_world_vertices, source_control_points, 'sqeuclidean').astype(DEFAULT_DTYPE)
+        # Numba利用可能時はJIT版を使用（3-5倍高速化）
+        batch_dists = cdist_fast(batch_world_vertices, source_control_points, 'sqeuclidean')
         batch_phi = np.sqrt(batch_dists + DEFAULT_DTYPE(epsilon**2))
 
         # 多項式項の計算（DEFAULT_DTYPEに統一）
@@ -377,7 +583,51 @@ def process_vertex_batch(batch_data: Dict[str, Any]) -> Tuple[int, int, np.ndarr
         del batch_dists, batch_phi, batch_P
         
         return start_idx, end_idx, batch_displacements
-        
+
+    except Exception as e:
+        print(f"バッチ処理中にエラーが発生: {e}")
+        raise
+
+
+def process_vertex_batch_thread(args: Tuple) -> Tuple[int, int, np.ndarray]:
+    """
+    頂点のバッチを処理する関数（ThreadPoolExecutor用）
+
+    ThreadPoolExecutorはメモリを共有するため、大きな配列をコピーせずに
+    参照渡しで効率的に処理できます。NumPyのBLAS操作はGILを解放するため、
+    ThreadPoolExecutorでも並列性能が得られます。
+
+    Parameters:
+        args: (start_idx, end_idx, target_world_vertices, source_control_points,
+               rbf_weights, poly_weights, epsilon, dim)
+
+    Returns:
+        Tuple[start_idx, end_idx, displacements]
+    """
+    (start_idx, end_idx, target_world_vertices, source_control_points,
+     rbf_weights, poly_weights, epsilon, dim) = args
+
+    batch_world_vertices = target_world_vertices[start_idx:end_idx]
+    current_batch_size = end_idx - start_idx
+
+    try:
+        # ターゲット頂点と制御点の間の距離を計算
+        # Numba利用可能時はJIT版を使用（3-5倍高速化）
+        batch_dists = cdist_fast(batch_world_vertices, source_control_points, 'sqeuclidean')
+        batch_phi = np.sqrt(batch_dists + DEFAULT_DTYPE(epsilon**2))
+
+        # 多項式項の計算（DEFAULT_DTYPEに統一）
+        batch_P = np.ones((current_batch_size, dim + 1), dtype=DEFAULT_DTYPE)
+        batch_P[:, 1:] = batch_world_vertices
+
+        # 各ターゲット頂点の変位を計算
+        batch_displacements = np.dot(batch_phi, rbf_weights) + np.dot(batch_P, poly_weights)
+
+        # メモリ解放
+        del batch_dists, batch_phi, batch_P
+
+        return start_idx, end_idx, batch_displacements
+
     except Exception as e:
         print(f"バッチ処理中にエラーが発生: {e}")
         raise
@@ -426,14 +676,14 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
     # スケーリング係数を計算：距離の標準偏差に基づく値を使用
     if epsilon <= 0:
         # 平均距離に基づいて適切なepsilonを計算
-        dists = cdist(source_control_points, source_control_points)
+        dists = cdist_fast(source_control_points, source_control_points, 'euclidean')
         mean_dist = np.mean(dists[dists > 0])
         epsilon = mean_dist  # 平均距離をepsilonとして使用
         print(f"自動計算されたepsilon: {epsilon}")
-    
-    # 制御点間の距離行列を計算
-    print("RBF行列を計算中...")
-    dist_matrix = cdist(source_control_points, source_control_points, 'sqeuclidean').astype(DEFAULT_DTYPE)
+
+    # 制御点間の距離行列を計算（Numba利用可能時はJIT版を使用）
+    print(f"RBF行列を計算中...（Numba: {'有効' if NUMBA_AVAILABLE else '無効'}）")
+    dist_matrix = cdist_fast(source_control_points, source_control_points, 'sqeuclidean')
 
     # RBF行列を計算
     phi = np.sqrt(dist_matrix + DEFAULT_DTYPE(epsilon**2))
@@ -455,31 +705,49 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
     # 解を求める
     print(f"線形システムを解いています（行列サイズ: {A.shape[0]}x{A.shape[1]}, dtype: {A.dtype}）...")
     solve_start = time.time()
-    try:
-        # 通常の解法を試みる（DEFAULT_DTYPE精度）
-        x = np.linalg.solve(A, b)
-    except np.linalg.LinAlgError:
-        # float32で失敗した場合、float64に昇格してリトライ
-        if A.dtype == np.float32:
-            print("float32で解法失敗 - float64に昇格してリトライします")
-            try:
-                A_f64 = A.astype(np.float64)
-                b_f64 = b.astype(np.float64)
-                x = np.linalg.solve(A_f64, b_f64).astype(DEFAULT_DTYPE)
-                del A_f64, b_f64
-            except np.linalg.LinAlgError:
-                # float64でも失敗した場合、正則化して疑似逆行列を使用（float64で最大安定性）
-                print("float64でも失敗 - 正則化を適用します（float64精度）")
-                A_f64 = A.astype(np.float64)
-                b_f64 = b.astype(np.float64)
-                reg_f64 = np.eye(A.shape[0], dtype=np.float64) * 1e-6
-                x = np.linalg.lstsq(A_f64 + reg_f64, b_f64, rcond=None)[0].astype(DEFAULT_DTYPE)
-                del A_f64, b_f64, reg_f64
+    x = None
+
+    # GMRES反復ソルバーを試行（実験的機能、USE_GMRES_SOLVER=Trueで有効化）
+    if USE_GMRES_SOLVER:
+        print("GMRES反復ソルバーを試行中...（実験的機能）")
+        gmres_start = time.time()
+        x_gmres, gmres_success = solve_with_gmres(A, b)
+        gmres_time = time.time() - gmres_start
+
+        if gmres_success and x_gmres is not None:
+            x = x_gmres.astype(DEFAULT_DTYPE)
+            print(f"GMRES収束成功（{gmres_time:.2f}秒）")
         else:
-            # 既にfloat64の場合、正則化して疑似逆行列を使用
-            print("行列が特異です - 正則化を適用します")
-            reg = np.eye(A.shape[0], dtype=np.float64) * 1e-6
-            x = np.linalg.lstsq(A + reg, b, rcond=None)[0]
+            print(f"GMRES収束失敗（{gmres_time:.2f}秒）- 直接法にフォールバック")
+
+    # 直接法（LU分解）
+    if x is None:
+        try:
+            # 通常の解法を試みる（DEFAULT_DTYPE精度）
+            x = np.linalg.solve(A, b)
+        except np.linalg.LinAlgError:
+            # float32で失敗した場合、float64に昇格してリトライ
+            if A.dtype == np.float32:
+                print("float32で解法失敗 - float64に昇格してリトライします")
+                try:
+                    A_f64 = A.astype(np.float64)
+                    b_f64 = b.astype(np.float64)
+                    x = np.linalg.solve(A_f64, b_f64).astype(DEFAULT_DTYPE)
+                    del A_f64, b_f64
+                except np.linalg.LinAlgError:
+                    # float64でも失敗した場合、正則化して疑似逆行列を使用（float64で最大安定性）
+                    print("float64でも失敗 - 正則化を適用します（float64精度）")
+                    A_f64 = A.astype(np.float64)
+                    b_f64 = b.astype(np.float64)
+                    reg_f64 = np.eye(A.shape[0], dtype=np.float64) * 1e-6
+                    x = np.linalg.lstsq(A_f64 + reg_f64, b_f64, rcond=None)[0].astype(DEFAULT_DTYPE)
+                    del A_f64, b_f64, reg_f64
+            else:
+                # 既にfloat64の場合、正則化して疑似逆行列を使用
+                print("行列が特異です - 正則化を適用します")
+                reg = np.eye(A.shape[0], dtype=np.float64) * 1e-6
+                x = np.linalg.lstsq(A + reg, b, rcond=None)[0]
+
     solve_time = time.time() - solve_start
     print(f"線形システム求解完了（{solve_time:.2f}秒）")
 
@@ -499,70 +767,124 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
     # 結果を格納する配列を初期化
     target_displacements = np.zeros_like(target_world_vertices, dtype=DEFAULT_DTYPE)
     
-    # バッチデータを準備
-    batch_tasks = []
-    for batch_start in range(0, total_vertices, batch_size):
-        batch_end = min(batch_start + batch_size, total_vertices)
-        batch_world_vertices = target_world_vertices[batch_start:batch_end].copy()  # コピーを作成
-        
-        batch_data = {
-            'start_idx': batch_start,
-            'end_idx': batch_end,
-            'batch_world_vertices': batch_world_vertices,
-            'source_control_points': source_control_points,
-            'rbf_weights': rbf_weights,
-            'poly_weights': poly_weights,
-            'epsilon': epsilon,
-            'dim': dim
-        }
-        batch_tasks.append(batch_data)
-    
-    print(f"ターゲットメッシュの頂点を {len(batch_tasks)} バッチでマルチプロセス処理します（全 {total_vertices} 頂点）")
+    # ハイブリッド並列化（P2-3）: ThreadPoolExecutor or ProcessPoolExecutor
+    if USE_HYBRID_PARALLELIZATION:
+        # ThreadPoolExecutor用: タプル形式のバッチタスク
+        # メモリ共有が可能なため、データをコピーせず参照を渡す
+        batch_tasks_thread = []
+        for batch_start in range(0, total_vertices, batch_size):
+            batch_end = min(batch_start + batch_size, total_vertices)
+            # タプル形式: (start_idx, end_idx, target_world_vertices, source_control_points,
+            #              rbf_weights, poly_weights, epsilon, dim)
+            batch_tasks_thread.append((
+                batch_start, batch_end, target_world_vertices, source_control_points,
+                rbf_weights, poly_weights, epsilon, dim
+            ))
 
-    # ProcessPoolExecutor 開始直前に BLAS スレッド数を制限
-    # np.linalg.solve() は既に完了しているので、ここからは並列処理のオーバーサブスクライブ防止のため制限
-    # max_workers == 1 の場合は制限不要（低メモリモード等で単一ワーカーの場合はフルスレッド活用）
-    if max_workers == 1:
-        print("単一ワーカーモード: BLAS スレッド制限なし（フルスレッド活用）")
+        # ThreadPoolExecutorはNumPy BLAS操作でGILを解放するため並列性が得られる
+        # Numba JIT関数もnogil=True指定によりGILを解放
+        # CPUコア数を上限としてオーバーサブスクライブを防止
+        cpu_count = os.cpu_count() or 4
+        thread_workers = min(cpu_count, max_workers * 2)  # スレッドはプロセスより軽量だが上限あり
+        print(f"ターゲットメッシュの頂点を {len(batch_tasks_thread)} バッチで"
+              f"ThreadPool処理します（全 {total_vertices} 頂点, ワーカー数: {thread_workers}）")
+        print("ハイブリッド並列化モード: ThreadPoolExecutor（NumPy GIL解放活用）")
+
+        processed_count = 0
+        with ThreadPoolExecutor(max_workers=thread_workers) as executor:
+            future_to_idx = {executor.submit(process_vertex_batch_thread, task): task[0]
+                            for task in batch_tasks_thread}
+
+            for future in as_completed(future_to_idx):
+                try:
+                    start_idx, end_idx, batch_displacements = future.result()
+                    target_displacements[start_idx:end_idx] = batch_displacements
+
+                    processed_count += (end_idx - start_idx)
+                    progress_percent = (processed_count / total_vertices) * 100
+
+                    if processed_count % (batch_size * 20) == 0 or processed_count == total_vertices:
+                        if memory_monitor.enabled:
+                            current_memory = memory_monitor.get_memory_usage()
+                            print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 "
+                                  f"({progress_percent:.1f}%) [メモリ: {current_memory:.1f}GB]")
+                        else:
+                            print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%)")
+
+                except Exception as exc:
+                    batch_start_idx = future_to_idx[future]
+                    print(f"バッチ開始位置 {batch_start_idx} でエラーが発生: {exc}")
+                    print("スタックトレース:")
+                    traceback.print_exc()
+                    raise exc
+
+        print("ThreadPool処理が完了しました")
+
     else:
-        blas_threads = '2'
-        os.environ['OMP_NUM_THREADS'] = blas_threads
-        os.environ['OPENBLAS_NUM_THREADS'] = blas_threads
-        os.environ['MKL_NUM_THREADS'] = blas_threads
-        os.environ['VECLIB_MAXIMUM_THREADS'] = blas_threads
-        os.environ['NUMEXPR_NUM_THREADS'] = blas_threads
-        print(f"BLAS スレッド数を {blas_threads} に制限しました（ProcessPoolExecutor 開始前、ワーカー数: {max_workers}）")
-    
-    # マルチプロセス処理
-    processed_count = 0
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        # バッチを並列処理
-        future_to_batch = {executor.submit(process_vertex_batch, batch_data): batch_data for batch_data in batch_tasks}
-        
-        for future in as_completed(future_to_batch):
-            try:
-                start_idx, end_idx, batch_displacements = future.result()
-                target_displacements[start_idx:end_idx] = batch_displacements
-                
-                processed_count += (end_idx - start_idx)
-                progress_percent = (processed_count / total_vertices) * 100
-                
-                # プロセスプールでの進捗表示（メモリ監視は各プロセスで独立）
-                if processed_count % (batch_size * 20) == 0 or processed_count == total_vertices:
-                    if memory_monitor.enabled:
-                        current_memory = memory_monitor.get_memory_usage()
-                        print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%) [メインプロセスメモリ: {current_memory:.1f}GB]")
-                    else:
-                        print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%)")
-                
-            except Exception as exc:
-                batch_data = future_to_batch[future]
-                print(f"バッチ {batch_data['start_idx']}-{batch_data['end_idx']} でエラーが発生: {exc}")
-                print("スタックトレース:")
-                traceback.print_exc()
-                raise exc
-    
-    print("マルチプロセス処理が完了しました")
+        # ProcessPoolExecutor用: 辞書形式のバッチタスク（従来方式）
+        batch_tasks = []
+        for batch_start in range(0, total_vertices, batch_size):
+            batch_end = min(batch_start + batch_size, total_vertices)
+            batch_world_vertices = target_world_vertices[batch_start:batch_end].copy()  # コピーを作成
+
+            batch_data = {
+                'start_idx': batch_start,
+                'end_idx': batch_end,
+                'batch_world_vertices': batch_world_vertices,
+                'source_control_points': source_control_points,
+                'rbf_weights': rbf_weights,
+                'poly_weights': poly_weights,
+                'epsilon': epsilon,
+                'dim': dim
+            }
+            batch_tasks.append(batch_data)
+
+        print(f"ターゲットメッシュの頂点を {len(batch_tasks)} バッチでマルチプロセス処理します（全 {total_vertices} 頂点）")
+
+        # ProcessPoolExecutor 開始直前に BLAS スレッド数を制限
+        # np.linalg.solve() は既に完了しているので、ここからは並列処理のオーバーサブスクライブ防止のため制限
+        # max_workers == 1 の場合は制限不要（低メモリモード等で単一ワーカーの場合はフルスレッド活用）
+        if max_workers == 1:
+            print("単一ワーカーモード: BLAS スレッド制限なし（フルスレッド活用）")
+        else:
+            blas_threads = '2'
+            os.environ['OMP_NUM_THREADS'] = blas_threads
+            os.environ['OPENBLAS_NUM_THREADS'] = blas_threads
+            os.environ['MKL_NUM_THREADS'] = blas_threads
+            os.environ['VECLIB_MAXIMUM_THREADS'] = blas_threads
+            os.environ['NUMEXPR_NUM_THREADS'] = blas_threads
+            print(f"BLAS スレッド数を {blas_threads} に制限しました（ProcessPoolExecutor 開始前、ワーカー数: {max_workers}）")
+
+        # マルチプロセス処理
+        processed_count = 0
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # バッチを並列処理
+            future_to_batch = {executor.submit(process_vertex_batch, batch_data): batch_data for batch_data in batch_tasks}
+
+            for future in as_completed(future_to_batch):
+                try:
+                    start_idx, end_idx, batch_displacements = future.result()
+                    target_displacements[start_idx:end_idx] = batch_displacements
+
+                    processed_count += (end_idx - start_idx)
+                    progress_percent = (processed_count / total_vertices) * 100
+
+                    # プロセスプールでの進捗表示（メモリ監視は各プロセスで独立）
+                    if processed_count % (batch_size * 20) == 0 or processed_count == total_vertices:
+                        if memory_monitor.enabled:
+                            current_memory = memory_monitor.get_memory_usage()
+                            print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%) [メインプロセスメモリ: {current_memory:.1f}GB]")
+                        else:
+                            print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%)")
+
+                except Exception as exc:
+                    batch_data = future_to_batch[future]
+                    print(f"バッチ {batch_data['start_idx']}-{batch_data['end_idx']} でエラーが発生: {exc}")
+                    print("スタックトレース:")
+                    traceback.print_exc()
+                    raise exc
+
+        print("マルチプロセス処理が完了しました")
 
     # フォールオフ処理を適用
     print("フォールオフ処理を適用中...")
@@ -902,8 +1224,19 @@ def main():
                        help='低メモリモード（バッチサイズとワーカー数を自動的に制限）')
     parser.add_argument('--old-version', action='store_true',
                        help='旧バージョン形式で保存（互換性のため）')
-    
+    parser.add_argument('--use-threadpool', action='store_true',
+                       help='ハイブリッド並列化: RBF評価でThreadPoolExecutorを使用（実験的）')
+    parser.add_argument('--use-gmres', action='store_true',
+                       help='GMRES反復ソルバーを使用（実験的、収束しない場合は直接法にフォールバック）')
+
     args = parser.parse_args()
+
+    # 実験的機能フラグの設定
+    global USE_HYBRID_PARALLELIZATION, USE_GMRES_SOLVER
+    if args.use_threadpool:
+        USE_HYBRID_PARALLELIZATION = True
+    if args.use_gmres:
+        USE_GMRES_SOLVER = True
 
     if PSUTIL_AVAILABLE:
         set_cpu_affinity()
@@ -917,12 +1250,16 @@ def main():
             args.max_workers = 1  # プロセスプールでは1つに制限
     
     print(f"CPU数: {os.cpu_count()}")
+    print(f"Numba JIT: {'有効（距離計算高速化）' if NUMBA_AVAILABLE else '無効（pip install numba で有効化可能）'}")
+    print(f"GMRES反復ソルバー: {'有効（--use-gmres）' if USE_GMRES_SOLVER else '無効'}")
+    print(f"ハイブリッド並列化: {'有効（--use-threadpool）' if USE_HYBRID_PARALLELIZATION else '無効（ProcessPoolExecutor）'}")
     # 注意: BLAS スレッド制限は ProcessPoolExecutor 開始直前に行う
     # 線形システム求解（np.linalg.solve）は ProcessPoolExecutor 前に実行されるため、
     # ここでは制限せず、multiprocess_rbf_interpolation() 内で制限する
     # これにより線形システム求解のパフォーマンスを維持しつつ、
     # ProcessPoolExecutor でのオーバーサブスクライブを防ぐ
-    print("BLAS スレッド数: 線形システム求解後に制限予定")
+    if not USE_HYBRID_PARALLELIZATION:
+        print("BLAS スレッド数: 線形システム求解後に制限予定")
     
     np.__config__.show()
     
