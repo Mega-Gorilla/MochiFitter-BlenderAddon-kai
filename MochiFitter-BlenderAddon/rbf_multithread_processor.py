@@ -468,14 +468,17 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
                 x = np.linalg.solve(A_f64, b_f64).astype(DEFAULT_DTYPE)
                 del A_f64, b_f64
             except np.linalg.LinAlgError:
-                # float64でも失敗した場合、正則化して疑似逆行列を使用
-                print("float64でも失敗 - 正則化を適用します")
-                reg = np.eye(A.shape[0], dtype=DEFAULT_DTYPE) * DEFAULT_DTYPE(1e-6)
-                x = np.linalg.lstsq(A + reg, b, rcond=None)[0]
+                # float64でも失敗した場合、正則化して疑似逆行列を使用（float64で最大安定性）
+                print("float64でも失敗 - 正則化を適用します（float64精度）")
+                A_f64 = A.astype(np.float64)
+                b_f64 = b.astype(np.float64)
+                reg_f64 = np.eye(A.shape[0], dtype=np.float64) * 1e-6
+                x = np.linalg.lstsq(A_f64 + reg_f64, b_f64, rcond=None)[0].astype(DEFAULT_DTYPE)
+                del A_f64, b_f64, reg_f64
         else:
             # 既にfloat64の場合、正則化して疑似逆行列を使用
             print("行列が特異です - 正則化を適用します")
-            reg = np.eye(A.shape[0], dtype=DEFAULT_DTYPE) * DEFAULT_DTYPE(1e-6)
+            reg = np.eye(A.shape[0], dtype=np.float64) * 1e-6
             x = np.linalg.lstsq(A + reg, b, rcond=None)[0]
     solve_time = time.time() - solve_start
     print(f"線形システム求解完了（{solve_time:.2f}秒）")
