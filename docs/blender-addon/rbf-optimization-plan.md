@@ -101,7 +101,7 @@ dist_matrix = cdist(
 
 **リスク**:
 - 数値安定性の若干の低下
-- RBF補間は本質的にC0連続であり、float32で十分な精度
+- 3Dメッシュ変形用途ではfloat32で十分な精度（視覚的に差異が認識できない）
 
 **検証方法**:
 - 同一入力での出力比較（float64 vs float32）
@@ -113,7 +113,7 @@ dist_matrix = cdist(
 
 **概要**: Multi-Quadratic Biharmonic から Gaussian RBF へ変更
 
-**期待効果**: 処理速度 +10-15%（sqrt → exp は高速）
+**期待効果**: 数値安定性向上、条件数改善
 
 **実装箇所**: `rbf_multithread_processor.py`
 
@@ -125,50 +125,84 @@ phi = np.sqrt(dist_matrix + epsilon**2)
 phi = np.exp(-dist_matrix / (epsilon**2))
 ```
 
-**リスク**: 極低（精度同等もしくは若干改善）
+**Gaussianカーネルの利点**:
+- **正定値性**: Gaussian RBF は常に正定値行列を生成（phi ブロックのみ考慮時）
+- **局所的影響**: 距離が増すと急速に減衰し、遠方制御点の影響が抑制される
+- **無限回微分可能**: 補間結果が滑らかになる
+- **epsilon調整が容易**: 形状パラメータの直感的な解釈（影響半径）
+
+**注意**: 計算速度は sqrt と exp でほぼ同等（環境依存）。
+主な採用理由は数値的性質の改善。
+
+**リスク**: 低（epsilon パラメータの再調整が必要な場合あり）
 
 **検証方法**:
-- ベンチマーク比較
-- 補間精度テスト
+- 補間精度テスト（視覚的確認）
+- 条件数の比較（`np.linalg.cond(A)`）
 
 ---
 
-#### P1-1: Cholesky分解適用
+#### P1-1: LU分解の再利用（3成分同時求解）
 
-**概要**: LU分解の代わりにCholesky分解を使用
+**概要**: x, y, z 各成分の線形求解でLU分解を再利用
 
-**期待効果**: 線形求解 25-30%高速化（27秒 → 19-20秒）
+**期待効果**: 線形求解 60-65%高速化（27秒 → 10-12秒）
 
 **理論的背景**:
-- Cholesky分解: (1/3)×n³ FLOPS
-- LU分解: (2/3)×n³ FLOPS
-- RBF行列は対称正定値であり、Cholesky適用可能
+
+RBF補間行列は以下のサドルポイント構造を持つ：
+```
+A = [[phi, P ],
+     [P^T, 0 ]]
+```
+- `phi`: RBFカーネル値行列（n×n、対称）
+- `P`: 多項式項（n×4、[1, x, y, z]）
+- `0`: ゼロブロック（4×4）
+
+この構造は**対称であるが正定値ではない**（ゼロブロックの存在により不定値）。
+したがって Cholesky 分解は適用不可。
+
+しかし、現在 x, y, z 成分ごとに3回 `np.linalg.solve()` を呼んでおり、
+毎回同じ行列 A の LU 分解を再計算している。**行列 A は共通**なので、
+LU 分解を1回行い、後方代入を3回行うことで大幅な高速化が可能。
 
 **実装箇所**: `rbf_multithread_processor.py`
 
 ```python
 import scipy.linalg
 
-# 変更前
-x = np.linalg.solve(A, b)
+# 変更前: 3回のsolve（各回でLU分解）
+weights_x = np.linalg.solve(A, b_x)  # LU分解 + 後方代入
+weights_y = np.linalg.solve(A, b_y)  # LU分解 + 後方代入
+weights_z = np.linalg.solve(A, b_z)  # LU分解 + 後方代入
 
-# 変更後
-try:
-    L = scipy.linalg.cholesky(A, lower=True)
-    x = scipy.linalg.cho_solve((L, True), b)
-except np.linalg.LinAlgError:
-    # フォールバック: 条件数が悪い場合
-    print("Cholesky分解失敗 - LU分解にフォールバック")
-    x = np.linalg.solve(A, b)
+# 変更後: LU分解1回 + 後方代入3回
+lu, piv = scipy.linalg.lu_factor(A)  # LU分解1回のみ
+weights_x = scipy.linalg.lu_solve((lu, piv), b_x)
+weights_y = scipy.linalg.lu_solve((lu, piv), b_y)
+weights_z = scipy.linalg.lu_solve((lu, piv), b_z)
+
+# または、右辺を結合して一度に求解
+B = np.column_stack([b_x, b_y, b_z])  # (n+4, 3)
+weights = scipy.linalg.lu_solve((lu, piv), B)  # (n+4, 3)
+weights_x, weights_y, weights_z = weights[:, 0], weights[:, 1], weights[:, 2]
 ```
 
-**リスク**: 低（条件数確認必要、フォールバック実装で安全）
+**計算量の比較**:
+- 変更前: LU分解 O(n³) × 3回 = O(3n³)
+- 変更後: LU分解 O(n³) × 1回 + 後方代入 O(n²) × 3回 ≈ O(n³)
+- n=15,783 の場合、約66%の計算量削減
+
+**リスク**: 極低（既存ロジックの単純な最適化）
 
 ---
 
 #### P1-2: バッチサイズ動的最適化
 
 **概要**: 固定バッチサイズ（1,000）を動的に最適化
+
+**現状**: `rbf_multithread_processor.py` の `batch_size=1000` はハードコードされている
+（`process_batches()` 関数内）
 
 **期待効果**: 処理速度 +15-25%（通信オーバーヘッド削減）
 
@@ -244,30 +278,38 @@ def cdist_euclidean_numba(A, B):
 
 #### P2-2: 前処理付き反復ソルバー（GMRES）
 
-**概要**: 直接法（LU/Cholesky）から反復法（GMRES）へ変更
+**概要**: 直接法（LU）から反復法（GMRES）へ変更
 
-**期待効果**: 線形求解 55-70%高速化（27秒 → 8-12秒）
+**期待効果**: 線形求解 40-60%高速化（10秒 → 4-6秒）※P1-1適用後
 
 **理論的背景**:
 - RBF行列は通常 well-conditioned（条件数 κ~100-500）
 - 反復法は少ない反復で収束可能
-- 前処理により更に高速化
+- **不完全LU分解（ILU）** による前処理で収束を加速
+
+**注意**: 完全LU分解を前処理に使うと直接法と同等のコストがかかるため、
+疎行列化した不完全LU（spilu）を使用する必要がある。
 
 ```python
-from scipy.sparse.linalg import gmres, LinearOperator
-from scipy.linalg import lu_factor, lu_solve
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import gmres, spilu, LinearOperator
 
 def solve_with_gmres(A, b, tol=1e-6):
     """
-    前処理付きGMRESソルバー
+    不完全LU前処理付きGMRESソルバー
     """
     n = A.shape[0]
 
-    # 不完全LU分解による前処理
-    lu, piv = lu_factor(A)
+    # 密行列を疎行列に変換（ILU用）
+    A_sparse = csc_matrix(A)
+
+    # 不完全LU分解（ILU）による前処理
+    # drop_tol: 小さい要素を無視する閾値
+    # fill_factor: 元の非ゼロ要素数に対する許容倍率
+    ilu = spilu(A_sparse, drop_tol=1e-4, fill_factor=10)
 
     def preconditioner(x):
-        return lu_solve((lu, piv), x)
+        return ilu.solve(x)
 
     M = LinearOperator((n, n), matvec=preconditioner)
 
@@ -280,7 +322,12 @@ def solve_with_gmres(A, b, tol=1e-6):
     return x
 ```
 
-**リスク**: 中（条件数に依存、フォールバック必要）
+**注意点**:
+- RBF行列は密行列のため、ILUの効果は限定的な場合がある
+- drop_tol の調整が必要（大きすぎると精度低下、小さすぎると高コスト）
+- 直接法（P1-1のLU再利用）の方が安定する可能性あり
+
+**リスク**: 中（条件数・パラメータ調整に依存、フォールバック必要）
 
 ---
 
@@ -492,8 +539,8 @@ def benchmark_rbf_processing(control_pts, target_verts, iterations=3):
 
 | リスク | 影響度 | 発生確率 | 対策 |
 |--------|--------|---------|------|
-| float32精度不足 | 中 | 低 | 閾値テスト、フォールバック |
-| Cholesky分解失敗 | 中 | 低 | LU分解へのフォールバック |
+| float32精度不足 | 中 | 低 | 閾値テスト、float64へのフォールバック |
+| LU分解の数値不安定性 | 中 | 極低 | ピボット選択、条件数チェック |
 | GMRES非収束 | 高 | 中 | 直接法へのフォールバック |
 | Numba互換性問題 | 低 | 中 | オプショナル機能として実装 |
 | GPU未対応環境 | 低 | 高 | CPU版を維持 |
@@ -501,26 +548,36 @@ def benchmark_rbf_processing(control_pts, target_verts, iterations=3):
 ### 6.2 フォールバック戦略
 
 ```python
+import scipy.linalg
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import gmres, spilu, LinearOperator
+
 def solve_linear_system_with_fallback(A, b):
     """
     フォールバック付き線形システム求解
+
+    注意: RBF行列はサドルポイント構造のため、Cholesky分解は不可。
     """
-    # 優先度1: Cholesky分解
+    # 優先度1: LU分解（最も安定）
     try:
-        L = scipy.linalg.cholesky(A, lower=True)
-        return scipy.linalg.cho_solve((L, True), b)
+        lu, piv = scipy.linalg.lu_factor(A)
+        return scipy.linalg.lu_solve((lu, piv), b)
     except np.linalg.LinAlgError:
         pass
 
-    # 優先度2: GMRES
+    # 優先度2: ILU前処理付きGMRES
     try:
-        x, info = gmres(A, b, tol=1e-6, maxiter=500)
+        n = A.shape[0]
+        A_sparse = csc_matrix(A)
+        ilu = spilu(A_sparse, drop_tol=1e-4)
+        M = LinearOperator((n, n), matvec=ilu.solve)
+        x, info = gmres(A, b, M=M, tol=1e-6, maxiter=500)
         if info == 0:
             return x
     except Exception:
         pass
 
-    # 優先度3: LU分解（確実）
+    # 優先度3: np.linalg.solve（最終手段）
     return np.linalg.solve(A, b)
 ```
 
@@ -546,4 +603,4 @@ def solve_linear_system_with_fallback(A, b):
 
 | 日付 | バージョン | 変更内容 |
 |------|-----------|---------|
-| 2024-12-17 | 1.0 | 初版作成 |
+| 2025-12-17 | 1.0 | 初版作成 |
