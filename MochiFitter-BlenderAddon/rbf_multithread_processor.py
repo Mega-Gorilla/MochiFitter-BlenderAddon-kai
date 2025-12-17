@@ -127,6 +127,10 @@ def multi_quadratic_biharmonic(r: np.ndarray, epsilon: float = 1.0) -> np.ndarra
     return np.sqrt(r**2 + epsilon**2)
 
 
+# デフォルトのデータ型（float32でメモリ効率化、float64で高精度）
+DEFAULT_DTYPE = np.float32
+
+
 def smooth_step(x: np.ndarray, edge0: float, edge1: float) -> np.ndarray:
     """
     Performs smooth Hermite interpolation between 0 and 1 when edge0 < x < edge1.
@@ -176,7 +180,7 @@ def compute_distances_to_source_mesh(target_vertices: np.ndarray, source_vertice
     - 距離配列
     """
     num_target = len(target_vertices)
-    distances = np.zeros(num_target)
+    distances = np.zeros(num_target, dtype=DEFAULT_DTYPE)
     
     # メモリモニタリングを開始
     memory_monitor = MemoryMonitor()
@@ -301,14 +305,14 @@ def process_vertex_batch(batch_data: Dict[str, Any]) -> Tuple[int, int, np.ndarr
     
     try:
         # ターゲット頂点と制御点の間の距離を計算
-        # メモリ効率のために一度に計算
-        batch_dists = cdist(batch_world_vertices, source_control_points, 'sqeuclidean')
-        batch_phi = np.sqrt(batch_dists + epsilon**2)
-        
-        # 多項式項の計算
-        batch_P = np.ones((current_batch_size, dim + 1))
+        # メモリ効率のために一度に計算（float32）
+        batch_dists = cdist(batch_world_vertices, source_control_points, 'sqeuclidean').astype(np.float32)
+        batch_phi = np.sqrt(batch_dists + np.float32(epsilon**2))
+
+        # 多項式項の計算（float32）
+        batch_P = np.ones((current_batch_size, dim + 1), dtype=np.float32)
         batch_P[:, 1:] = batch_world_vertices
-        
+
         # 各ターゲット頂点の変位を計算
         batch_displacements = np.dot(batch_phi, rbf_weights) + np.dot(batch_P, poly_weights)
         
@@ -352,8 +356,13 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
     if max_workers is None:
         max_workers = get_optimal_worker_count(total_vertices, memory_monitor)
     
-    print(f"マルチプロセスRBF補間を開始（ワーカー数: {max_workers}, 初期メモリ: {memory_monitor.initial_memory:.1f}GB）")
-    
+    print(f"マルチプロセスRBF補間を開始（ワーカー数: {max_workers}, 初期メモリ: {memory_monitor.initial_memory:.1f}GB, dtype: {DEFAULT_DTYPE.__name__}）")
+
+    # 入力をfloat32に変換（メモリ効率化）
+    source_control_points = source_control_points.astype(DEFAULT_DTYPE)
+    source_control_points_deformed = source_control_points_deformed.astype(DEFAULT_DTYPE)
+    target_world_vertices = target_world_vertices.astype(DEFAULT_DTYPE)
+
     # 変位ベクトルを計算（変形後の位置 - 元の位置）
     displacements = source_control_points_deformed - source_control_points
     
@@ -367,23 +376,23 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
     
     # 制御点間の距離行列を計算
     print("RBF行列を計算中...")
-    dist_matrix = cdist(source_control_points, source_control_points, 'sqeuclidean')
-    
+    dist_matrix = cdist(source_control_points, source_control_points, 'sqeuclidean').astype(DEFAULT_DTYPE)
+
     # RBF行列を計算
-    phi = np.sqrt(dist_matrix + epsilon**2)
-    
+    phi = np.sqrt(dist_matrix + DEFAULT_DTYPE(epsilon**2))
+
     num_pts, dim = source_control_points.shape
-    P = np.ones((num_pts, dim + 1))
+    P = np.ones((num_pts, dim + 1), dtype=DEFAULT_DTYPE)
     P[:, 1:] = source_control_points  # 多項式項のための拡張行列
-    
+
     # 完全な線形システムを構築
-    A = np.zeros((num_pts + dim + 1, num_pts + dim + 1))
+    A = np.zeros((num_pts + dim + 1, num_pts + dim + 1), dtype=DEFAULT_DTYPE)
     A[:num_pts, :num_pts] = phi
     A[:num_pts, num_pts:] = P
     A[num_pts:, :num_pts] = P.T
-    
+
     # 右辺を設定
-    b = np.zeros((num_pts + dim + 1, dim))
+    b = np.zeros((num_pts + dim + 1, dim), dtype=DEFAULT_DTYPE)
     b[:num_pts] = displacements
     
     # 解を求める
@@ -414,7 +423,7 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
         print(f"メモリ使用量に基づいてバッチサイズを調整: {batch_size}")
     
     # 結果を格納する配列を初期化
-    target_displacements = np.zeros_like(target_world_vertices)
+    target_displacements = np.zeros_like(target_world_vertices, dtype=DEFAULT_DTYPE)
     
     # バッチデータを準備
     batch_tasks = []
