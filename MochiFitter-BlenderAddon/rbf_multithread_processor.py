@@ -127,6 +127,67 @@ def multi_quadratic_biharmonic(r: np.ndarray, epsilon: float = 1.0) -> np.ndarra
     return np.sqrt(r**2 + epsilon**2)
 
 
+# デフォルトのデータ型（float32でメモリ効率化、float64で高精度）
+DEFAULT_DTYPE = np.float32
+
+
+def calculate_optimal_batch_size(num_control_pts: int, max_workers: int,
+                                  available_memory_gb: float = None) -> int:
+    """
+    メモリ制約を考慮した最適バッチサイズ計算
+
+    Parameters:
+    - num_control_pts: 制御点の数
+    - max_workers: ワーカー数
+    - available_memory_gb: 利用可能メモリ（GB）、Noneの場合は自動検出
+
+    Returns:
+    - 最適なバッチサイズ
+
+    Note:
+        OOMエラーが発生する場合は以下の調整を検討:
+        - MEMORY_USAGE_RATIO (0.5): 利用可能メモリの使用率を下げる（例: 0.3）
+        - MAX_BATCH_SIZE (20000): 上限を下げる（例: 10000）
+        - MIN_BATCH_SIZE (1000): 下限を調整（処理速度とのトレードオフ）
+    """
+    # 調整可能な定数（OOMが発生する場合はこれらを調整）
+    MEMORY_USAGE_RATIO = 0.5  # 利用可能メモリの使用率（安全マージン）
+    MIN_BATCH_SIZE = 1000     # 下限（小さすぎると通信オーバーヘッド増加）
+    MAX_BATCH_SIZE = 20000    # 上限（大きすぎるとメモリ断片化リスク）
+
+    # 利用可能メモリを取得
+    if available_memory_gb is None:
+        if PSUTIL_AVAILABLE:
+            available_memory_gb = psutil.virtual_memory().available / 1024**3
+        else:
+            available_memory_gb = 8.0  # デフォルト8GB
+
+    # バッチあたりメモリ使用量の推定
+    # - 距離行列: batch_size × num_control_pts × 4 bytes (float32)
+    # - RBF値: batch_size × num_control_pts × 4 bytes (float32)
+    # - 多項式項: batch_size × 4 × 4 bytes (float32)
+    # - 結果: batch_size × 3 × 4 bytes (float32)
+    bytes_per_vertex = num_control_pts * 4 * 2 + 4 * 4 + 3 * 4  # float32基準
+
+    # 利用可能メモリの指定率を使用
+    target_bytes = available_memory_gb * MEMORY_USAGE_RATIO * 1024**3
+
+    # ワーカー数で分割
+    bytes_per_worker = target_bytes / max(1, max_workers)
+
+    # 最適バッチサイズを計算
+    optimal_batch = int(bytes_per_worker / bytes_per_vertex)
+
+    # 上限・下限の設定
+    result = max(MIN_BATCH_SIZE, min(optimal_batch, MAX_BATCH_SIZE))
+
+    print(f"バッチサイズを動的計算: "
+          f"制御点数={num_control_pts}, ワーカー数={max_workers}, "
+          f"利用可能メモリ={available_memory_gb:.1f}GB → batch_size={result}")
+
+    return result
+
+
 def smooth_step(x: np.ndarray, edge0: float, edge1: float) -> np.ndarray:
     """
     Performs smooth Hermite interpolation between 0 and 1 when edge0 < x < edge1.
@@ -176,7 +237,7 @@ def compute_distances_to_source_mesh(target_vertices: np.ndarray, source_vertice
     - 距離配列
     """
     num_target = len(target_vertices)
-    distances = np.zeros(num_target)
+    distances = np.zeros(num_target, dtype=DEFAULT_DTYPE)
     
     # メモリモニタリングを開始
     memory_monitor = MemoryMonitor()
@@ -301,14 +362,14 @@ def process_vertex_batch(batch_data: Dict[str, Any]) -> Tuple[int, int, np.ndarr
     
     try:
         # ターゲット頂点と制御点の間の距離を計算
-        # メモリ効率のために一度に計算
-        batch_dists = cdist(batch_world_vertices, source_control_points, 'sqeuclidean')
-        batch_phi = np.sqrt(batch_dists + epsilon**2)
-        
-        # 多項式項の計算
-        batch_P = np.ones((current_batch_size, dim + 1))
+        # メモリ効率のために一度に計算（DEFAULT_DTYPEに統一）
+        batch_dists = cdist(batch_world_vertices, source_control_points, 'sqeuclidean').astype(DEFAULT_DTYPE)
+        batch_phi = np.sqrt(batch_dists + DEFAULT_DTYPE(epsilon**2))
+
+        # 多項式項の計算（DEFAULT_DTYPEに統一）
+        batch_P = np.ones((current_batch_size, dim + 1), dtype=DEFAULT_DTYPE)
         batch_P[:, 1:] = batch_world_vertices
-        
+
         # 各ターゲット頂点の変位を計算
         batch_displacements = np.dot(batch_phi, rbf_weights) + np.dot(batch_P, poly_weights)
         
@@ -352,8 +413,13 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
     if max_workers is None:
         max_workers = get_optimal_worker_count(total_vertices, memory_monitor)
     
-    print(f"マルチプロセスRBF補間を開始（ワーカー数: {max_workers}, 初期メモリ: {memory_monitor.initial_memory:.1f}GB）")
-    
+    print(f"マルチプロセスRBF補間を開始（ワーカー数: {max_workers}, 初期メモリ: {memory_monitor.initial_memory:.1f}GB, dtype: {DEFAULT_DTYPE.__name__}）")
+
+    # 入力をfloat32に変換（メモリ効率化）
+    source_control_points = source_control_points.astype(DEFAULT_DTYPE)
+    source_control_points_deformed = source_control_points_deformed.astype(DEFAULT_DTYPE)
+    target_world_vertices = target_world_vertices.astype(DEFAULT_DTYPE)
+
     # 変位ベクトルを計算（変形後の位置 - 元の位置）
     displacements = source_control_points_deformed - source_control_points
     
@@ -367,36 +433,53 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
     
     # 制御点間の距離行列を計算
     print("RBF行列を計算中...")
-    dist_matrix = cdist(source_control_points, source_control_points, 'sqeuclidean')
-    
+    dist_matrix = cdist(source_control_points, source_control_points, 'sqeuclidean').astype(DEFAULT_DTYPE)
+
     # RBF行列を計算
-    phi = np.sqrt(dist_matrix + epsilon**2)
-    
+    phi = np.sqrt(dist_matrix + DEFAULT_DTYPE(epsilon**2))
+
     num_pts, dim = source_control_points.shape
-    P = np.ones((num_pts, dim + 1))
+    P = np.ones((num_pts, dim + 1), dtype=DEFAULT_DTYPE)
     P[:, 1:] = source_control_points  # 多項式項のための拡張行列
-    
+
     # 完全な線形システムを構築
-    A = np.zeros((num_pts + dim + 1, num_pts + dim + 1))
+    A = np.zeros((num_pts + dim + 1, num_pts + dim + 1), dtype=DEFAULT_DTYPE)
     A[:num_pts, :num_pts] = phi
     A[:num_pts, num_pts:] = P
     A[num_pts:, :num_pts] = P.T
-    
+
     # 右辺を設定
-    b = np.zeros((num_pts + dim + 1, dim))
+    b = np.zeros((num_pts + dim + 1, dim), dtype=DEFAULT_DTYPE)
     b[:num_pts] = displacements
     
     # 解を求める
-    print(f"線形システムを解いています（行列サイズ: {A.shape[0]}x{A.shape[1]}）...")
+    print(f"線形システムを解いています（行列サイズ: {A.shape[0]}x{A.shape[1]}, dtype: {A.dtype}）...")
     solve_start = time.time()
     try:
-        # 通常の解法を試みる
+        # 通常の解法を試みる（DEFAULT_DTYPE精度）
         x = np.linalg.solve(A, b)
     except np.linalg.LinAlgError:
-        # 行列が特異な場合、正則化して疑似逆行列を使用
-        print("行列が特異です - 正則化を適用します")
-        reg = np.eye(A.shape[0]) * 1e-6
-        x = np.linalg.lstsq(A + reg, b, rcond=None)[0]
+        # float32で失敗した場合、float64に昇格してリトライ
+        if A.dtype == np.float32:
+            print("float32で解法失敗 - float64に昇格してリトライします")
+            try:
+                A_f64 = A.astype(np.float64)
+                b_f64 = b.astype(np.float64)
+                x = np.linalg.solve(A_f64, b_f64).astype(DEFAULT_DTYPE)
+                del A_f64, b_f64
+            except np.linalg.LinAlgError:
+                # float64でも失敗した場合、正則化して疑似逆行列を使用（float64で最大安定性）
+                print("float64でも失敗 - 正則化を適用します（float64精度）")
+                A_f64 = A.astype(np.float64)
+                b_f64 = b.astype(np.float64)
+                reg_f64 = np.eye(A.shape[0], dtype=np.float64) * 1e-6
+                x = np.linalg.lstsq(A_f64 + reg_f64, b_f64, rcond=None)[0].astype(DEFAULT_DTYPE)
+                del A_f64, b_f64, reg_f64
+        else:
+            # 既にfloat64の場合、正則化して疑似逆行列を使用
+            print("行列が特異です - 正則化を適用します")
+            reg = np.eye(A.shape[0], dtype=np.float64) * 1e-6
+            x = np.linalg.lstsq(A + reg, b, rcond=None)[0]
     solve_time = time.time() - solve_start
     print(f"線形システム求解完了（{solve_time:.2f}秒）")
 
@@ -414,7 +497,7 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
         print(f"メモリ使用量に基づいてバッチサイズを調整: {batch_size}")
     
     # 結果を格納する配列を初期化
-    target_displacements = np.zeros_like(target_world_vertices)
+    target_displacements = np.zeros_like(target_world_vertices, dtype=DEFAULT_DTYPE)
     
     # バッチデータを準備
     batch_tasks = []
@@ -501,14 +584,16 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
     return target_displacements, np.array(final_displacements)
 
 
-def process_temp_file(temp_file_path: str, max_workers: int = None, old_version: bool = False) -> str:
+def process_temp_file(temp_file_path: str, max_workers: int = None,
+                      old_version: bool = False, batch_size: int = None) -> str:
     """
     一時ファイルを処理してマルチプロセスRBF補間を実行
-    
+
     Parameters:
     - temp_file_path: 一時データファイルのパス
     - max_workers: 最大ワーカー数
     - old_version: 旧バージョン形式で保存するかどうか
+    - batch_size: バッチサイズ（Noneの場合は動的に最適化）
     
     Returns:
     - 出力ファイルのパス
@@ -549,7 +634,23 @@ def process_temp_file(temp_file_path: str, max_workers: int = None, old_version:
         print(f"  ステップ {step+1} フィールド頂点数: {len(all_field_world_vertices[step])}")
     print(f"  逆変形: {invert}")
     print(f"  Epsilon: {epsilon}")
-    
+
+    # 最適なワーカー数を計算（最初のステップのデータを使用）
+    first_step_data = all_step_data[0]
+    num_control_pts = len(first_step_data['control_points_original'])
+    total_vertices = len(all_field_world_vertices[0])
+    memory_monitor = MemoryMonitor()
+    if max_workers is None:
+        max_workers = get_optimal_worker_count(total_vertices, memory_monitor)
+
+    # バッチサイズの決定（ユーザー指定優先、未指定なら動的計算）
+    if batch_size is not None:
+        optimal_batch_size = batch_size
+        print(f"  バッチサイズ: {optimal_batch_size}（ユーザー指定）")
+    else:
+        optimal_batch_size = calculate_optimal_batch_size(num_control_pts, max_workers)
+        print(f"  バッチサイズ: {optimal_batch_size}（動的計算）")
+
     # 各ステップの変位を計算
     all_displacements = []
     all_target_world_vertices = []
@@ -577,13 +678,13 @@ def process_temp_file(temp_file_path: str, max_workers: int = None, old_version:
         max_disp = np.max(np.linalg.norm(displacements, axis=1))
         print(f"制御点の最大変位: {max_disp}")
 
-        # マルチプロセスRBF補間を実行（メモリ効率化のためバッチサイズを調整）
+        # マルチプロセスRBF補間を実行（動的最適化されたバッチサイズを使用）
         target_displacements, final_displacements = rbf_interpolation_multithread(
-            source_control_points, 
-            source_control_points_deformed, 
+            source_control_points,
+            source_control_points_deformed,
             current_field_vertices,
             epsilon,
-            batch_size=1000,  # メモリ効率化のためバッチサイズを削減
+            batch_size=optimal_batch_size,
             max_workers=max_workers
         )
         
@@ -707,15 +808,17 @@ def save_field_data_multi_step(world_matrix, filepath,
     print(f"RBF関数: multi_quadratic_biharmonic, epsilon: {rbf_epsilon}, smoothing: {rbf_smoothing}")
 
 
-def process_multiple_temp_files(temp_file_pattern: str, max_workers: int = None, old_version: bool = False) -> List[str]:
+def process_multiple_temp_files(temp_file_pattern: str, max_workers: int = None,
+                                old_version: bool = False, batch_size: int = None) -> List[str]:
     """
     複数の一時ファイルを処理（順方向と逆方向）
-    
+
     Parameters:
     - temp_file_pattern: 一時データファイルのパターン（_invサフィックスなし）
     - max_workers: 最大ワーカー数
     - old_version: 旧バージョン形式で保存するかどうか
-    
+    - batch_size: バッチサイズ（Noneの場合は動的に最適化）
+
     Returns:
     - 出力ファイルのパスのリスト
     """
@@ -753,7 +856,7 @@ def process_multiple_temp_files(temp_file_pattern: str, max_workers: int = None,
         start_time = time.time()
         
         try:
-            output_path = process_temp_file(temp_file, max_workers, old_version)
+            output_path = process_temp_file(temp_file, max_workers, old_version, batch_size)
             output_paths.append(output_path)
             
             end_time = time.time()
@@ -789,8 +892,8 @@ def main():
     parser.add_argument('temp_file', help='一時データファイルのパス（基本ファイル名、自動的に_invファイルも処理）')
     parser.add_argument('--max-workers', type=int, default=16, 
                        help='最大プロセス数（デフォルト: CPUコア数・メモリ容量に基づく自動設定）')
-    parser.add_argument('--batch-size', type=int, default=10000,
-                       help='バッチサイズ（デフォルト: 10000、プロセス間での効率を考慮）')
+    parser.add_argument('--batch-size', type=int, default=None,
+                       help='バッチサイズ（未指定時は動的に最適化。指定時はその値を優先）')
     parser.add_argument('--single-file', action='store_true',
                        help='単一ファイルのみを処理（_invファイルを自動検出しない）')
     parser.add_argument('--memory-limit', type=float, default=None,
@@ -808,7 +911,7 @@ def main():
     # 低メモリモードの場合、設定を調整（プロセスプール用）
     if args.low_memory:
         print("低メモリモードが有効です。バッチサイズとプロセス数を制限します。")
-        if args.batch_size > 2000:
+        if args.batch_size is None or args.batch_size > 2000:
             args.batch_size = 2000
         if args.max_workers is None or args.max_workers > 1:
             args.max_workers = 1  # プロセスプールでは1つに制限
@@ -846,7 +949,8 @@ def main():
         start_time = time.time()
         
         try:
-            output_path = process_temp_file(args.temp_file, args.max_workers, args.old_version)
+            output_path = process_temp_file(args.temp_file, args.max_workers,
+                                           args.old_version, args.batch_size)
             
             end_time = time.time()
             processing_time = end_time - start_time
@@ -864,7 +968,8 @@ def main():
         # 複数ファイル処理モード（デフォルト）
         try:
             print(f"複数ファイル処理モード")
-            output_paths = process_multiple_temp_files(args.temp_file, args.max_workers, args.old_version)
+            output_paths = process_multiple_temp_files(args.temp_file, args.max_workers,
+                                                      args.old_version, args.batch_size)
             
             if not output_paths:
                 print("エラー: 処理されたファイルがありません")
