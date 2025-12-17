@@ -387,7 +387,8 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
     b[:num_pts] = displacements
     
     # 解を求める
-    print("線形システムを解いています...")
+    print(f"線形システムを解いています（行列サイズ: {A.shape[0]}x{A.shape[1]}）...")
+    solve_start = time.time()
     try:
         # 通常の解法を試みる
         x = np.linalg.solve(A, b)
@@ -396,7 +397,9 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
         print("行列が特異です - 正則化を適用します")
         reg = np.eye(A.shape[0]) * 1e-6
         x = np.linalg.lstsq(A + reg, b, rcond=None)[0]
-    
+    solve_time = time.time() - solve_start
+    print(f"線形システム求解完了（{solve_time:.2f}秒）")
+
     # 重みを抽出
     rbf_weights = x[:num_pts]
     poly_weights = x[num_pts:]
@@ -433,12 +436,19 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
     
     print(f"ターゲットメッシュの頂点を {len(batch_tasks)} バッチでマルチプロセス処理します（全 {total_vertices} 頂点）")
 
-    # プロセス開始時にスレッド数を1に制限（各プロセスで実行）
-    os.environ['OMP_NUM_THREADS'] = '2'
-    os.environ['OPENBLAS_NUM_THREADS'] = '2'
-    os.environ['MKL_NUM_THREADS'] = '2'
-    os.environ['VECLIB_MAXIMUM_THREADS'] = '2'
-    os.environ['NUMEXPR_NUM_THREADS'] = '2'
+    # ProcessPoolExecutor 開始直前に BLAS スレッド数を制限
+    # np.linalg.solve() は既に完了しているので、ここからは並列処理のオーバーサブスクライブ防止のため制限
+    # max_workers == 1 の場合は制限不要（低メモリモード等で単一ワーカーの場合はフルスレッド活用）
+    if max_workers == 1:
+        print("単一ワーカーモード: BLAS スレッド制限なし（フルスレッド活用）")
+    else:
+        blas_threads = '2'
+        os.environ['OMP_NUM_THREADS'] = blas_threads
+        os.environ['OPENBLAS_NUM_THREADS'] = blas_threads
+        os.environ['MKL_NUM_THREADS'] = blas_threads
+        os.environ['VECLIB_MAXIMUM_THREADS'] = blas_threads
+        os.environ['NUMEXPR_NUM_THREADS'] = blas_threads
+        print(f"BLAS スレッド数を {blas_threads} に制限しました（ProcessPoolExecutor 開始前、ワーカー数: {max_workers}）")
     
     # マルチプロセス処理
     processed_count = 0
@@ -804,15 +814,12 @@ def main():
             args.max_workers = 1  # プロセスプールでは1つに制限
     
     print(f"CPU数: {os.cpu_count()}")
-    # Phase 1-B: BLAS スレッド数を固定値に制限（プロセス並列との併用でオーバーサブスクライブ防止）
-    # ProcessPoolExecutor と BLAS スレッドの組み合わせで CPU/メモリが逼迫するのを防ぐ
-    blas_threads = '2'
-    os.environ['OMP_NUM_THREADS'] = blas_threads
-    os.environ['OPENBLAS_NUM_THREADS'] = blas_threads
-    os.environ['MKL_NUM_THREADS'] = blas_threads
-    os.environ['VECLIB_MAXIMUM_THREADS'] = blas_threads
-    os.environ['NUMEXPR_NUM_THREADS'] = blas_threads
-    print(f"BLAS スレッド数を {blas_threads} に制限しました")
+    # 注意: BLAS スレッド制限は ProcessPoolExecutor 開始直前に行う
+    # 線形システム求解（np.linalg.solve）は ProcessPoolExecutor 前に実行されるため、
+    # ここでは制限せず、multiprocess_rbf_interpolation() 内で制限する
+    # これにより線形システム求解のパフォーマンスを維持しつつ、
+    # ProcessPoolExecutor でのオーバーサブスクライブを防ぐ
+    print("BLAS スレッド数: 線形システム求解後に制限予定")
     
     np.__config__.show()
     
