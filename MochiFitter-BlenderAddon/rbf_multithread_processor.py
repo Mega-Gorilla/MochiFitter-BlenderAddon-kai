@@ -24,8 +24,8 @@ import traceback
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from scipy.spatial.distance import cdist
 from scipy.spatial import KDTree
-from scipy.sparse import csc_matrix
-from scipy.sparse.linalg import gmres, spilu, LinearOperator
+from scipy.sparse import csc_matrix  # 将来のコンパクト台RBF用（現在未使用）
+from scipy.sparse.linalg import gmres, LinearOperator  # spilu は対角前処理に変更のため削除
 from typing import Tuple, List, Dict, Any
 
 # psutilの可用性をチェック
@@ -150,7 +150,7 @@ DEFAULT_DTYPE = np.float32
 # Numba JIT高速化関数（P2-1）
 # =============================================================================
 
-@jit(nopython=True, parallel=True, fastmath=True, cache=True)
+@jit(nopython=True, parallel=True, fastmath=True, cache=True, nogil=True)
 def _cdist_sqeuclidean_numba(A: np.ndarray, B: np.ndarray) -> np.ndarray:
     """
     Numba JIT版 二乗ユークリッド距離計算
@@ -161,6 +161,10 @@ def _cdist_sqeuclidean_numba(A: np.ndarray, B: np.ndarray) -> np.ndarray:
 
     Returns:
     - 形状 (m, n) の二乗距離行列
+
+    Note:
+        nogil=True により、GILを解放して実行します。
+        ThreadPoolExecutorとの併用時も並列性能が得られます。
     """
     m, d = A.shape
     n = B.shape[0]
@@ -177,7 +181,7 @@ def _cdist_sqeuclidean_numba(A: np.ndarray, B: np.ndarray) -> np.ndarray:
     return result
 
 
-@jit(nopython=True, parallel=True, fastmath=True, cache=True)
+@jit(nopython=True, parallel=True, fastmath=True, cache=True, nogil=True)
 def _cdist_euclidean_numba(A: np.ndarray, B: np.ndarray) -> np.ndarray:
     """
     Numba JIT版 ユークリッド距離計算
@@ -188,6 +192,10 @@ def _cdist_euclidean_numba(A: np.ndarray, B: np.ndarray) -> np.ndarray:
 
     Returns:
     - 形状 (m, n) の距離行列
+
+    Note:
+        nogil=True により、GILを解放して実行します。
+        ThreadPoolExecutorとの併用時も並列性能が得られます。
     """
     m, d = A.shape
     n = B.shape[0]
@@ -214,9 +222,16 @@ def cdist_fast(A: np.ndarray, B: np.ndarray, metric: str = 'sqeuclidean') -> np.
     - metric: 'sqeuclidean'（二乗ユークリッド）または 'euclidean'
 
     Returns:
-    - 距離行列
+    - 距離行列（float32）
+
+    Note:
+        この関数は常にfloat32を返します（Numba経路・scipy経路共通）。
+        - Numba JIT版: 内部でfloat32固定（パフォーマンス最適化）
+        - scipy.cdist版: 結果をDEFAULT_DTYPE（通常float32）にキャスト
+
+        将来DEFAULT_DTYPE=float64を許容する場合は、Numba経路の精度制限に注意。
     """
-    # float32に変換（Numba版は float32 固定）
+    # float32に変換（Numba版は float32 固定、精度よりパフォーマンス重視）
     A_f32 = A.astype(np.float32) if A.dtype != np.float32 else A
     B_f32 = B.astype(np.float32) if B.dtype != np.float32 else B
 
@@ -246,10 +261,15 @@ USE_GMRES_SOLVER = False
 USE_HYBRID_PARALLELIZATION = False
 
 
+# GMRES使用時の行列サイズ上限（密行列の疎行列変換はメモリ・時間的に非現実的）
+# コンパクト台RBF導入後に緩和可能
+GMRES_MAX_MATRIX_SIZE = 5000
+
+
 def solve_with_gmres(A: np.ndarray, b: np.ndarray, tol: float = 1e-6,
                      maxiter: int = 500, restart: int = 100) -> Tuple[np.ndarray, bool]:
     """
-    ILU前処理付きGMRESソルバー
+    GMRES反復ソルバー（対角前処理）
 
     Parameters:
     - A: 係数行列 (n, n)
@@ -263,26 +283,37 @@ def solve_with_gmres(A: np.ndarray, b: np.ndarray, tol: float = 1e-6,
     - success: 収束したかどうか
 
     Note:
-        RBF行列は密行列のため、ILU前処理の効果は限定的な場合があります。
-        収束しない場合は直接法（LU分解）にフォールバックしてください。
+        現在のRBF行列は密行列のため、ILU前処理ではなく対角前処理を使用します。
+        - 密行列をcsc_matrixに変換してspiluすると、非ゼロ要素がほぼ全てになり
+          メモリ・時間の観点で破綻します（n≈15,783でA要素数≈2.5e8）
+        - コンパクト台RBF導入後（Aが疎になる場合）はILU前処理が効果的です
+
+        行列サイズがGMRES_MAX_MATRIX_SIZEを超える場合は即座にフォールバックします。
     """
     n = A.shape[0]
     b_is_matrix = b.ndim == 2
 
-    try:
-        # 密行列を疎行列に変換（ILU用）
-        # 注意: 元が密行列なので変換コストがかかる
-        A_sparse = csc_matrix(A)
+    # 密行列サイズガード: 大きすぎる場合は即フォールバック
+    if n > GMRES_MAX_MATRIX_SIZE:
+        print(f"GMRES: 行列サイズ {n} が上限 {GMRES_MAX_MATRIX_SIZE} を超過 - 直接法にフォールバック")
+        print(f"  (密行列の疎行列変換は n>{GMRES_MAX_MATRIX_SIZE} でメモリ・時間的に非現実的)")
+        return None, False
 
-        # 不完全LU分解による前処理
-        # drop_tol: 小さい要素を無視する閾値（大きいほど高速だが精度低下）
-        # fill_factor: 元の非ゼロ要素数に対する許容倍率
-        ilu = spilu(A_sparse, drop_tol=1e-4, fill_factor=10)
+    try:
+        # 対角前処理（密行列に対して安全かつ効果的）
+        # ILU前処理は密行列では非現実的なため使用しない
+        diag = np.diag(A)
+        # ゼロ除算を避けるため、小さい対角要素を1に置換
+        diag = np.where(np.abs(diag) < 1e-10, 1.0, diag)
+
+        # 対角前処理: M^{-1} = diag(A)^{-1}
+        # 密行列に対して安全で、ILUより軽量
+        diag_inv = 1.0 / diag
 
         def preconditioner(x):
-            return ilu.solve(x)
+            return diag_inv * x
 
-        M = LinearOperator((n, n), matvec=preconditioner)
+        M = LinearOperator((n, n), matvec=preconditioner, dtype=A.dtype)
 
         if b_is_matrix:
             # 複数の右辺ベクトルを持つ場合（x, y, z成分）
@@ -751,8 +782,10 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
             ))
 
         # ThreadPoolExecutorはNumPy BLAS操作でGILを解放するため並列性が得られる
-        # ただし、Numba JIT関数はGILを保持する場合があるため注意
-        thread_workers = max_workers * 2  # スレッドはプロセスより軽量なので多めに
+        # Numba JIT関数もnogil=True指定によりGILを解放
+        # CPUコア数を上限としてオーバーサブスクライブを防止
+        cpu_count = os.cpu_count() or 4
+        thread_workers = min(cpu_count, max_workers * 2)  # スレッドはプロセスより軽量だが上限あり
         print(f"ターゲットメッシュの頂点を {len(batch_tasks_thread)} バッチで"
               f"ThreadPool処理します（全 {total_vertices} 頂点, ワーカー数: {thread_workers}）")
         print("ハイブリッド並列化モード: ThreadPoolExecutor（NumPy GIL解放活用）")
