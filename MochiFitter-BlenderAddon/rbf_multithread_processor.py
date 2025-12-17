@@ -24,6 +24,8 @@ import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from scipy.spatial.distance import cdist
 from scipy.spatial import KDTree
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import gmres, spilu, LinearOperator
 from typing import Tuple, List, Dict, Any
 
 # psutilの可用性をチェック
@@ -229,6 +231,74 @@ def cdist_fast(A: np.ndarray, B: np.ndarray, metric: str = 'sqeuclidean') -> np.
     else:
         # Numbaがない場合はscipy.cdistを使用
         return cdist(A, B, metric).astype(DEFAULT_DTYPE)
+
+
+# =============================================================================
+# GMRES反復ソルバー（P2-2）
+# =============================================================================
+
+# GMRES使用フラグ（実験的機能、デフォルトは無効）
+USE_GMRES_SOLVER = False
+
+
+def solve_with_gmres(A: np.ndarray, b: np.ndarray, tol: float = 1e-6,
+                     maxiter: int = 500, restart: int = 100) -> Tuple[np.ndarray, bool]:
+    """
+    ILU前処理付きGMRESソルバー
+
+    Parameters:
+    - A: 係数行列 (n, n)
+    - b: 右辺ベクトル/行列 (n,) or (n, m)
+    - tol: 収束許容誤差
+    - maxiter: 最大反復回数
+    - restart: リスタート間隔
+
+    Returns:
+    - x: 解ベクトル/行列
+    - success: 収束したかどうか
+
+    Note:
+        RBF行列は密行列のため、ILU前処理の効果は限定的な場合があります。
+        収束しない場合は直接法（LU分解）にフォールバックしてください。
+    """
+    n = A.shape[0]
+    b_is_matrix = b.ndim == 2
+
+    try:
+        # 密行列を疎行列に変換（ILU用）
+        # 注意: 元が密行列なので変換コストがかかる
+        A_sparse = csc_matrix(A)
+
+        # 不完全LU分解による前処理
+        # drop_tol: 小さい要素を無視する閾値（大きいほど高速だが精度低下）
+        # fill_factor: 元の非ゼロ要素数に対する許容倍率
+        ilu = spilu(A_sparse, drop_tol=1e-4, fill_factor=10)
+
+        def preconditioner(x):
+            return ilu.solve(x)
+
+        M = LinearOperator((n, n), matvec=preconditioner)
+
+        if b_is_matrix:
+            # 複数の右辺ベクトルを持つ場合（x, y, z成分）
+            m = b.shape[1]
+            x = np.zeros_like(b)
+            all_converged = True
+
+            for i in range(m):
+                x_i, info = gmres(A, b[:, i], M=M, tol=tol, restart=restart, maxiter=maxiter)
+                x[:, i] = x_i
+                if info != 0:
+                    all_converged = False
+
+            return x, all_converged
+        else:
+            x, info = gmres(A, b, M=M, tol=tol, restart=restart, maxiter=maxiter)
+            return x, (info == 0)
+
+    except Exception as e:
+        print(f"GMRES処理中にエラー: {e}")
+        return None, False
 
 
 def calculate_optimal_batch_size(num_control_pts: int, max_workers: int,
@@ -555,31 +625,49 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
     # 解を求める
     print(f"線形システムを解いています（行列サイズ: {A.shape[0]}x{A.shape[1]}, dtype: {A.dtype}）...")
     solve_start = time.time()
-    try:
-        # 通常の解法を試みる（DEFAULT_DTYPE精度）
-        x = np.linalg.solve(A, b)
-    except np.linalg.LinAlgError:
-        # float32で失敗した場合、float64に昇格してリトライ
-        if A.dtype == np.float32:
-            print("float32で解法失敗 - float64に昇格してリトライします")
-            try:
-                A_f64 = A.astype(np.float64)
-                b_f64 = b.astype(np.float64)
-                x = np.linalg.solve(A_f64, b_f64).astype(DEFAULT_DTYPE)
-                del A_f64, b_f64
-            except np.linalg.LinAlgError:
-                # float64でも失敗した場合、正則化して疑似逆行列を使用（float64で最大安定性）
-                print("float64でも失敗 - 正則化を適用します（float64精度）")
-                A_f64 = A.astype(np.float64)
-                b_f64 = b.astype(np.float64)
-                reg_f64 = np.eye(A.shape[0], dtype=np.float64) * 1e-6
-                x = np.linalg.lstsq(A_f64 + reg_f64, b_f64, rcond=None)[0].astype(DEFAULT_DTYPE)
-                del A_f64, b_f64, reg_f64
+    x = None
+
+    # GMRES反復ソルバーを試行（実験的機能、USE_GMRES_SOLVER=Trueで有効化）
+    if USE_GMRES_SOLVER:
+        print("GMRES反復ソルバーを試行中...（実験的機能）")
+        gmres_start = time.time()
+        x_gmres, gmres_success = solve_with_gmres(A, b)
+        gmres_time = time.time() - gmres_start
+
+        if gmres_success and x_gmres is not None:
+            x = x_gmres.astype(DEFAULT_DTYPE)
+            print(f"GMRES収束成功（{gmres_time:.2f}秒）")
         else:
-            # 既にfloat64の場合、正則化して疑似逆行列を使用
-            print("行列が特異です - 正則化を適用します")
-            reg = np.eye(A.shape[0], dtype=np.float64) * 1e-6
-            x = np.linalg.lstsq(A + reg, b, rcond=None)[0]
+            print(f"GMRES収束失敗（{gmres_time:.2f}秒）- 直接法にフォールバック")
+
+    # 直接法（LU分解）
+    if x is None:
+        try:
+            # 通常の解法を試みる（DEFAULT_DTYPE精度）
+            x = np.linalg.solve(A, b)
+        except np.linalg.LinAlgError:
+            # float32で失敗した場合、float64に昇格してリトライ
+            if A.dtype == np.float32:
+                print("float32で解法失敗 - float64に昇格してリトライします")
+                try:
+                    A_f64 = A.astype(np.float64)
+                    b_f64 = b.astype(np.float64)
+                    x = np.linalg.solve(A_f64, b_f64).astype(DEFAULT_DTYPE)
+                    del A_f64, b_f64
+                except np.linalg.LinAlgError:
+                    # float64でも失敗した場合、正則化して疑似逆行列を使用（float64で最大安定性）
+                    print("float64でも失敗 - 正則化を適用します（float64精度）")
+                    A_f64 = A.astype(np.float64)
+                    b_f64 = b.astype(np.float64)
+                    reg_f64 = np.eye(A.shape[0], dtype=np.float64) * 1e-6
+                    x = np.linalg.lstsq(A_f64 + reg_f64, b_f64, rcond=None)[0].astype(DEFAULT_DTYPE)
+                    del A_f64, b_f64, reg_f64
+            else:
+                # 既にfloat64の場合、正則化して疑似逆行列を使用
+                print("行列が特異です - 正則化を適用します")
+                reg = np.eye(A.shape[0], dtype=np.float64) * 1e-6
+                x = np.linalg.lstsq(A + reg, b, rcond=None)[0]
+
     solve_time = time.time() - solve_start
     print(f"線形システム求解完了（{solve_time:.2f}秒）")
 
