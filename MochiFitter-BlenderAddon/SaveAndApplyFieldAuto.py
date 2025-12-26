@@ -23,8 +23,8 @@ try:
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
-    print("警告: scipyが見つかりません。一部の機能が制限されます。")
-    print("NumPy・SciPy再インストールボタンを使用してインストールしてください。")
+    print("Warning: scipy not found. Some features will be limited.")
+    print("Please use the NumPy/SciPy reinstall button to install.")
 
 print(f"SciPy available: {SCIPY_AVAILABLE}")
 
@@ -2939,12 +2939,12 @@ class CREATE_OT_RBFDeformation(bpy.types.Operator, ExportHelper):
         
         # アバター名の検証
         if not source_avatar_name or not target_avatar_name:
-            self.report({'ERROR'}, "アバター名を設定してください")
+            self.report({'ERROR'}, "Please set avatar name")
             return {'CANCELLED'}
         
         # シェイプキーの値の範囲検証
         if shape_key_start_value == shape_key_end_value:
-            self.report({'ERROR'}, "シェイプキーの開始値と終了値は異なる値を設定してください")
+            self.report({'ERROR'}, "Shape key start and end values must be different")
             return {'CANCELLED'}
         
         default_paths = []
@@ -2987,7 +2987,7 @@ class CREATE_OT_RBFDeformation(bpy.types.Operator, ExportHelper):
                     shutil.copy2(default_paths[1], inv_filepath)
                 filelist.append(self.filepath[:-4] + "_inv.npz")
 
-            self.report({'INFO'}, f"変形データを保存しました: {', '.join(filelist)}")
+            self.report({'INFO'}, f"Deformation data saved: {', '.join(filelist)}")
             return {'FINISHED'}
         
         except Exception as e:
@@ -3037,7 +3037,7 @@ class APPLY_OT_FieldData(bpy.types.Operator):
         source_shape_key_name = scene.rbf_source_shape_key
         
         if not source_avatar_name:
-            self.report({'ERROR'}, "ソースアバター名を指定してください")
+            self.report({'ERROR'}, "Please specify source avatar name")
             return {'CANCELLED'}
         
         # ファイルパスを現在の設定に基づいて生成
@@ -3045,36 +3045,36 @@ class APPLY_OT_FieldData(bpy.types.Operator):
         if save_shape_key_mode:
             # シェイプキー変形モードの場合
             if not source_shape_key_name:
-                self.report({'ERROR'}, "シェイプキー変形モードではシェイプキー名を指定してください")
+                self.report({'ERROR'}, "Please specify shape key name in shape key mode")
                 return {'CANCELLED'}
             field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_shape_{source_shape_key_name}.npz")
-            display_name = f"シェイプキー変形データ"
+            display_name = "Shape key deformation data"
         else:
             # 通常のアバター間変形の場合
             if not target_avatar_name:
-                self.report({'ERROR'}, "ターゲットアバター名を指定してください")
+                self.report({'ERROR'}, "Please specify target avatar name")
                 return {'CANCELLED'}
             field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_to_{target_avatar_name}.npz")
-            display_name = f"アバター間変形データ"
-        
+            display_name = "Inter-avatar deformation data"
+
         if not os.path.exists(field_data_path):
-            self.report({'ERROR'}, f"{display_name}ファイルが見つかりません: {os.path.basename(field_data_path)}")
-            print(f"変形データファイルが見つかりません: {field_data_path}")
+            self.report({'ERROR'}, f"{display_name} file not found: {os.path.basename(field_data_path)}")
+            print(f"Deformation data file not found: {field_data_path}")
             return {'CANCELLED'}
         
         try:
             target_obj = context.active_object
             if not target_obj or target_obj.type != 'MESH':  
-                self.report({'ERROR'}, "メッシュオブジェクトを選択してください")
+                self.report({'ERROR'}, "Please select a Mesh object")
                 return {'CANCELLED'}
             
             shape_key_name = scene.rbf_apply_shape_key_name if scene.rbf_apply_shape_key_name else "RBFDeform"
             apply_field_data(target_obj, field_data_path, shape_key_name)
-            self.report({'INFO'}, f"{display_name}を適用しました: {os.path.basename(field_data_path)}")
+            self.report({'INFO'}, f"{display_name} applied: {os.path.basename(field_data_path)}")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
@@ -3106,22 +3106,22 @@ class SAVE_OT_BasePoseDiff(bpy.types.Operator, ExportHelper):
         
         # アバター名の検証
         if not source_avatar_name:
-            self.report({'ERROR'}, "ソースアバター名を設定してください")
+            self.report({'ERROR'}, "Please set source avatar name")
             return {'CANCELLED'}
         
         if not source_avatar_data_file:
-            self.report({'ERROR'}, "ソースアバターデータファイルを指定してください")
+            self.report({'ERROR'}, "Please specify source avatar data file")
             return {'CANCELLED'}
         
         # アクティブオブジェクトを取得
         active_obj = context.active_object
         if not active_obj:
-            self.report({'ERROR'}, "オブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an object")
             return {'CANCELLED'}
         
         # アクティブオブジェクトがArmatureかチェック
         if active_obj.type != 'ARMATURE':
-            self.report({'ERROR'}, "Armatureオブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an Armature object")
             return {'CANCELLED'}
         
         armature_obj = active_obj
@@ -3143,12 +3143,12 @@ class SAVE_OT_BasePoseDiff(bpy.types.Operator, ExportHelper):
             # 指定された場所に移動
             if saved_filepath != filepath and os.path.abspath(saved_filepath) != os.path.abspath(filepath):
                 shutil.copy2(saved_filepath, filepath)
-            
-            self.report({'INFO'}, f"ベースポーズデータを保存しました: {filepath}")
+
+            self.report({'INFO'}, f"Base pose data saved: {filepath}")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
@@ -3186,22 +3186,22 @@ class APPLY_OT_BasePoseDiff(bpy.types.Operator):
         
         # アバター名の検証
         if not source_avatar_name:
-            self.report({'ERROR'}, "ソースアバター名を設定してください")
+            self.report({'ERROR'}, "Please set source avatar name")
             return {'CANCELLED'}
         
         if not source_avatar_data_file:
-            self.report({'ERROR'}, "ソースアバターデータファイルを指定してください")
+            self.report({'ERROR'}, "Please specify source avatar data file")
             return {'CANCELLED'}
         
         # アクティブオブジェクトを取得
         active_obj = context.active_object
         if not active_obj:
-            self.report({'ERROR'}, "オブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an object")
             return {'CANCELLED'}
         
         # アクティブオブジェクトがArmatureかチェック
         if active_obj.type != 'ARMATURE':
-            self.report({'ERROR'}, "Armatureオブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an Armature object")
             return {'CANCELLED'}
         
         armature_obj = active_obj
@@ -3217,12 +3217,12 @@ class APPLY_OT_BasePoseDiff(bpy.types.Operator):
         
         try:
             add_pose_from_json(pose_filename, avatar_data_filename, invert)
-            action = "逆適用" if invert else "適用"
-            self.report({'INFO'}, f"ベースポーズデータを{action}しました: {pose_filename}")
+            action = "inverse applied" if invert else "applied"
+            self.report({'INFO'}, f"Base pose data {action}: {pose_filename}")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
@@ -3255,22 +3255,22 @@ class SAVE_OT_PoseDiff(bpy.types.Operator, ExportHelper):
         
         # アバター名の検証
         if not source_avatar_name or not target_avatar_name:
-            self.report({'ERROR'}, "アバター名を設定してください")
+            self.report({'ERROR'}, "Please set avatar name")
             return {'CANCELLED'}
         
         if not source_avatar_data_file:
-            self.report({'ERROR'}, "ソースアバターデータファイルを指定してください")
+            self.report({'ERROR'}, "Please specify source avatar data file")
             return {'CANCELLED'}
         
         # アクティブオブジェクトを取得
         active_obj = context.active_object
         if not active_obj:
-            self.report({'ERROR'}, "オブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an object")
             return {'CANCELLED'}
         
         # アクティブオブジェクトがArmatureかチェック
         if active_obj.type != 'ARMATURE':
-            self.report({'ERROR'}, "Armatureオブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an Armature object")
             return {'CANCELLED'}
         
         armature_obj = active_obj
@@ -3292,17 +3292,17 @@ class SAVE_OT_PoseDiff(bpy.types.Operator, ExportHelper):
             # 指定された場所に移動
             if saved_filepath != filepath and os.path.abspath(saved_filepath) != os.path.abspath(filepath):
                 shutil.copy2(saved_filepath, filepath)
-            
-            self.report({'INFO'}, f"ポーズデータを保存しました: {filepath}")
+
+            self.report({'INFO'}, f"Pose data saved: {filepath}")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
             return {'CANCELLED'}
-    
+
     def invoke(self, context, event):
         # デフォルトファイル名を設定
         scene = context.scene
@@ -3337,22 +3337,22 @@ class APPLY_OT_PoseDiff(bpy.types.Operator):
         
         # アバター名の検証
         if not source_avatar_name or not target_avatar_name:
-            self.report({'ERROR'}, "アバター名を設定してください")
+            self.report({'ERROR'}, "Please set avatar name")
             return {'CANCELLED'}
         
         if not source_avatar_data_file:
-            self.report({'ERROR'}, "ソースアバターデータファイルを指定してください")
+            self.report({'ERROR'}, "Please specify source avatar data file")
             return {'CANCELLED'}
         
         # アクティブオブジェクトを取得
         active_obj = context.active_object
         if not active_obj:
-            self.report({'ERROR'}, "オブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an object")
             return {'CANCELLED'}
         
         # アクティブオブジェクトがArmatureかチェック
         if active_obj.type != 'ARMATURE':
-            self.report({'ERROR'}, "Armatureオブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an Armature object")
             return {'CANCELLED'}
         
         armature_obj = active_obj
@@ -3368,12 +3368,12 @@ class APPLY_OT_PoseDiff(bpy.types.Operator):
         
         try:
             add_pose_from_json(pose_filename, avatar_data_filename, invert)
-            action = "逆適用" if invert else "適用"
-            self.report({'INFO'}, f"ポーズデータを{action}しました: {pose_filename}")
+            action = "inverse applied" if invert else "applied"
+            self.report({'INFO'}, f"Pose data {action}: {pose_filename}")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
@@ -3402,7 +3402,7 @@ class SWAP_OT_AvatarSettings(bpy.types.Operator):
         scene.rbf_source_avatar_data_file = target_avatar_data_file
         scene.rbf_target_avatar_data_file = source_avatar_data_file
         
-        self.report({'INFO'}, "アバター設定を入れ替えました")
+        self.report({'INFO'}, "Avatar settings swapped")
         return {'FINISHED'}
 
 
@@ -3417,14 +3417,14 @@ class SET_OT_HumanoidBoneInheritScale(bpy.types.Operator):
         
         # アクティブオブジェクトがArmatureかチェック
         if not context.active_object or context.active_object.type != 'ARMATURE':
-            self.report({'ERROR'}, "Armatureオブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an Armature object")
             return {'CANCELLED'}
         
         armature_obj = context.active_object
         
         # ソースアバターデータファイルが設定されているかチェック
         if not scene.rbf_source_avatar_data_file:
-            self.report({'ERROR'}, "ソースアバターデータファイルを設定してください")
+            self.report({'ERROR'}, "Please set source avatar data file")
             return {'CANCELLED'}
         
         try:
@@ -3458,19 +3458,19 @@ class SET_OT_HumanoidBoneInheritScale(bpy.types.Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
             
             if modified_count > 0:
-                self.report({'INFO'}, f"{modified_count}個のHumanoidボーンのInherit ScaleをAverageに設定しました")
+                self.report({'INFO'}, f"Set Inherit Scale to Average for {modified_count} Humanoid bones")
             else:
-                self.report({'INFO'}, "変更すべきボーンがありませんでした")
-            
+                self.report({'INFO'}, "No bones needed modification")
+
             return {'FINISHED'}
-            
+
         except Exception as e:
             # エラー時はObjectModeに戻る
             try:
                 bpy.ops.object.mode_set(mode='OBJECT')
             except:
                 pass
-            self.report({'ERROR'}, f"エラーが発生しました: {str(e)}")
+            self.report({'ERROR'}, f"An error occurred: {str(e)}")
             return {'CANCELLED'}
 
 
@@ -3562,7 +3562,7 @@ class APPLY_OT_InverseFieldData(bpy.types.Operator):
         source_shape_key_name = scene.rbf_source_shape_key
         
         if not source_avatar_name:
-            self.report({'ERROR'}, "ソースアバター名を指定してください")
+            self.report({'ERROR'}, "Please specify source avatar name")
             return {'CANCELLED'}
         
         # ファイルパスを現在の設定に基づいて生成（逆変形）
@@ -3570,36 +3570,36 @@ class APPLY_OT_InverseFieldData(bpy.types.Operator):
         if save_shape_key_mode:
             # シェイプキー変形モードの場合
             if not source_shape_key_name:
-                self.report({'ERROR'}, "シェイプキー変形モードではシェイプキー名を指定してください")
+                self.report({'ERROR'}, "Please specify shape key name in shape key mode")
                 return {'CANCELLED'}
             field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_shape_{source_shape_key_name}_inv.npz")
-            display_name = f"逆シェイプキー変形データ"
+            display_name = "Inverse shape key deformation data"
         else:
             # 通常のアバター間変形の場合
             if not target_avatar_name:
-                self.report({'ERROR'}, "ターゲットアバター名を指定してください")
+                self.report({'ERROR'}, "Please specify target avatar name")
                 return {'CANCELLED'}
             field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_to_{target_avatar_name}_inv.npz")
-            display_name = f"逆アバター間変形データ"
-        
+            display_name = "Inverse inter-avatar deformation data"
+
         if not os.path.exists(field_data_path):
-            self.report({'ERROR'}, f"{display_name}ファイルが見つかりません: {os.path.basename(field_data_path)}")
-            print(f"逆変形データファイルが見つかりません: {field_data_path}")
+            self.report({'ERROR'}, f"{display_name} file not found: {os.path.basename(field_data_path)}")
+            print(f"Inverse deformation data file not found: {field_data_path}")
             return {'CANCELLED'}
         
         try:
             target_obj = context.active_object
             if not target_obj or target_obj.type != 'MESH':
-                self.report({'ERROR'}, "メッシュオブジェクトを選択してください")
+                self.report({'ERROR'}, "Please select a Mesh object")
                 return {'CANCELLED'}
             
             shape_key_name = scene.rbf_apply_shape_key_name if scene.rbf_apply_shape_key_name else "RBFDeform_inv"
             apply_field_data(target_obj, field_data_path, shape_key_name)
-            self.report({'INFO'}, f"{display_name}を適用しました: {os.path.basename(field_data_path)}")
+            self.report({'INFO'}, f"{display_name} applied: {os.path.basename(field_data_path)}")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
@@ -4037,12 +4037,12 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
 
         # アバター名の検証
         if not source_avatar_name or not target_avatar_name:
-            self.report({'ERROR'}, "アバター名を設定してください")
+            self.report({'ERROR'}, "Please set avatar name")
             return {'CANCELLED'}
 
         # シェイプキーの値の範囲検証
         if shape_key_start_value == shape_key_end_value:
-            self.report({'ERROR'}, "シェイプキーの開始値と終了値は異なる値を設定してください")
+            self.report({'ERROR'}, "Shape key start and end values must be different")
             return {'CANCELLED'}
 
 
@@ -4078,12 +4078,12 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
 
             # 保存されたファイルの情報を生成
             file_list = ", ".join([os.path.basename(path) for path in self._temp_file_paths])
-            self.report({'INFO'}, f"一時データをエクスポートしました: {file_list}")
+            self.report({'INFO'}, f"Temporary data exported: {file_list}")
 
             base_temp_path = self._temp_file_paths[0]
 
             print(f"\n{'='*60}")
-            print(f"RBF処理開始: {os.path.basename(base_temp_path)}")
+            print(f"RBF processing started: {os.path.basename(base_temp_path)}")
             print(f"{'='*60}")
 
             # Queue 初期化
@@ -4114,12 +4114,12 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                     # パスの存在確認
                     if not os.path.exists(python_path):
                         if q:
-                            q.put(('ERROR', f"Pythonバイナリが見つかりません: {python_path}"))
+                            q.put(('ERROR', f"Python binary not found: {python_path}"))
                         return
 
                     if not os.path.exists(processor_path):
                         if q:
-                            q.put(('ERROR', f"RBFプロセッサスクリプトが見つかりません: {processor_path}"))
+                            q.put(('ERROR', f"RBF processor script not found: {processor_path}"))
                         return
 
                     # 環境変数を設定
@@ -4153,7 +4153,7 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                     cmd = [python_path, '-u', processor_path, base_temp_path,
                            '--max-workers', str(max_workers)]
 
-                    print(f"実行コマンド: {' '.join(cmd)}")
+                    print(f"Executing command: {' '.join(cmd)}")
                     print(f"max_workers: {max_workers}, OMP_NUM_THREADS: 2")
 
                     # プロセスを起動
@@ -4192,7 +4192,7 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                         q.put(('DONE', self._process.returncode))
 
                 except Exception as e:
-                    error_msg = f"RBF処理中にエラーが発生しました: {str(e)}"
+                    error_msg = f"Error during RBF processing: {str(e)}"
                     print(error_msg)
                     print(traceback.format_exc())
                     if q:
@@ -4207,14 +4207,14 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
             context.window_manager.modal_handler_add(self)
 
             # ステータスバーに表示開始
-            context.workspace.status_text_set("RBF処理を開始しています...")
+            context.workspace.status_text_set("Starting RBF processing...")
 
-            self.report({'INFO'}, "マルチプロセス処理を開始しました（バックグラウンドで実行中）")
+            self.report({'INFO'}, "Multiprocess processing started (running in background)")
 
             return {'RUNNING_MODAL'}
 
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             # Phase 3: 例外時もプログレスバーを確実に終了
@@ -4231,17 +4231,17 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
         self._cleanup(context)
 
         if success:
-            self.report({'INFO'}, "RBF処理が正常に完了しました")
-            print("RBF処理が正常に完了しました")
+            self.report({'INFO'}, "RBF processing completed successfully")
+            print("RBF processing completed successfully")
 
             # 成功ポップアップを表示
             def draw_success_popup(self, context):
-                self.layout.label(text="Deformation Field の生成が完了しました")
+                self.layout.label(text="Deformation Field generation completed")
 
-            context.window_manager.popup_menu(draw_success_popup, title="処理完了", icon='CHECKMARK')
+            context.window_manager.popup_menu(draw_success_popup, title="Complete", icon='CHECKMARK')
         else:
-            self.report({'ERROR'}, "RBF処理でエラーが発生しました")
-            print("RBF処理でエラーが発生しました")
+            self.report({'ERROR'}, "RBF processing failed")
+            print("RBF processing failed")
 
         # UIを更新
         for area in context.screen.areas:
@@ -4300,7 +4300,7 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
         self._cleanup_temp_files()
 
         self._cleanup(context)
-        self.report({'WARNING'}, "RBF処理がキャンセルされました")
+        self.report({'WARNING'}, "RBF processing was cancelled")
 
     def _cleanup_temp_files(self):
         """一時ファイルをクリーンアップ（キャンセル時のみ）"""
@@ -4961,7 +4961,7 @@ class DEBUG_OT_ShowPythonPaths(bpy.types.Operator):
             
             print(f"{'='*60}")
             
-            self.report({'INFO'}, "デバッグ情報をコンソールに出力しました")
+            self.report({'INFO'}, "Debug info printed to console")
             return {'FINISHED'}
         
         except Exception as e:
@@ -4993,7 +4993,7 @@ class CREATE_OT_FieldVisualization(bpy.types.Operator):
         object_name = scene.rbf_field_object_name.strip()
         
         if not source_avatar_name:
-            self.report({'ERROR'}, "ソースアバター名を指定してください")
+            self.report({'ERROR'}, "Please specify source avatar name")
             return {'CANCELLED'}
         
         if not object_name:
@@ -5006,21 +5006,21 @@ class CREATE_OT_FieldVisualization(bpy.types.Operator):
         if save_shape_key_mode:
             # シェイプキー変形モードの場合
             if not source_shape_key_name:
-                self.report({'ERROR'}, "シェイプキー変形モードではシェイプキー名を指定してください")
+                self.report({'ERROR'}, "Please specify shape key name in shape key mode")
                 return {'CANCELLED'}
             field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_shape_{source_shape_key_name}{inverse_suffix}.npz")
-            display_name = f"シェイプキー変形データ"
+            display_name = "Shape key deformation data"
         else:
             # 通常のアバター間変形の場合
             if not target_avatar_name:
-                self.report({'ERROR'}, "ターゲットアバター名を指定してください")
+                self.report({'ERROR'}, "Please specify target avatar name")
                 return {'CANCELLED'}
             field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_to_{target_avatar_name}{inverse_suffix}.npz")
-            display_name = f"アバター間変形データ"
-        
+            display_name = "Inter-avatar deformation data"
+
         if not os.path.exists(field_data_path):
-            self.report({'ERROR'}, f"{display_name}ファイルが見つかりません: {os.path.basename(field_data_path)}")
-            print(f"変形データファイルが見つかりません: {field_data_path}")
+            self.report({'ERROR'}, f"{display_name} file not found: {os.path.basename(field_data_path)}")
+            print(f"Deformation data file not found: {field_data_path}")
             return {'CANCELLED'}
         
         try:
@@ -5031,12 +5031,12 @@ class CREATE_OT_FieldVisualization(bpy.types.Operator):
                 object_name=object_name
             )
             
-            direction_text = "逆変換" if use_inverse else "通常"
-            self.report({'INFO'}, f"フィールドオブジェクト '{field_obj.name}' を作成しました（{direction_text}、ステップ{field_step}）")
+            direction_text = "inverse" if use_inverse else "normal"
+            self.report({'INFO'}, f"Field object '{field_obj.name}' created ({direction_text}, step {field_step})")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
@@ -5455,35 +5455,35 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
                     if self._scipy_version:
                         packages_info += f", SciPy {self._scipy_version}"
                     else:
-                        packages_info += ", SciPy (新規インストール)"
+                        packages_info += ", SciPy (new installation)"
 
-                    self.report({'WARNING'}, f"{packages_info} を再インストールしました。Blenderを再起動してください")
-                    print(f"NumPy・SciPy再インストール成功。Blenderを再起動してください。")
+                    self.report({'WARNING'}, f"{packages_info} reinstalled. Please restart Blender")
+                    print(f"NumPy/SciPy reinstall succeeded. Please restart Blender.")
 
                     # 成功ポップアップを表示
                     def draw_success_popup(self, context):
-                        self.layout.label(text="NumPy・SciPy のインストールが完了しました")
+                        self.layout.label(text="NumPy/SciPy installation complete")
                         self.layout.label(text="")
-                        self.layout.label(text="Blender を再起動してください", icon='ERROR')
+                        self.layout.label(text="Please restart Blender", icon='ERROR')
 
-                    context.window_manager.popup_menu(draw_success_popup, title="インストール完了", icon='CHECKMARK')
+                    context.window_manager.popup_menu(draw_success_popup, title="Installation Complete", icon='CHECKMARK')
                 else:
                     if error:
                         self.report({'ERROR'}, error)
                     else:
-                        self.report({'ERROR'}, "NumPy・SciPy再インストールに失敗しました")
+                        self.report({'ERROR'}, "NumPy/SciPy reinstallation failed")
 
                     # エラーポップアップを表示
                     def draw_error_popup(self, context):
-                        self.layout.label(text="インストールに失敗しました")
+                        self.layout.label(text="Installation failed")
                         self.layout.label(text="")
                         if error:
                             # エラーメッセージを短く表示
                             short_error = error[:80] + "..." if len(error) > 80 else error
                             self.layout.label(text=short_error)
-                        self.layout.label(text="詳細はコンソールを確認してください", icon='INFO')
+                        self.layout.label(text="See console for details", icon='INFO')
 
-                    context.window_manager.popup_menu(draw_error_popup, title="インストールエラー", icon='ERROR')
+                    context.window_manager.popup_menu(draw_error_popup, title="Installation Error", icon='ERROR')
 
                 # UIを更新
                 for area in context.screen.areas:
@@ -5501,7 +5501,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
         self._scipy_version = get_scipy_version()
 
         if not self._numpy_version:
-            self.report({'ERROR'}, "numpy が見つかりません")
+            self.report({'ERROR'}, "numpy not found")
             return {'CANCELLED'}
 
         # bpy依存の値をメインスレッドで事前取得（スレッド安全性のため）
@@ -5510,7 +5510,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
         scipy_version = self._scipy_version
 
         if not python_path:
-            self.report({'ERROR'}, "Pythonパスが見つかりません")
+            self.report({'ERROR'}, "Python path not found")
             return {'CANCELLED'}
 
         # インストールを別スレッドで実行（純Pythonデータのみ渡す）
@@ -5533,7 +5533,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
         self._dot_count = 0
         context.workspace.status_text_set("NumPy・SciPy インストール中.")
 
-        self.report({'INFO'}, "インストール中... (バックグラウンドで実行中)")
+        self.report({'INFO'}, "Installing... (running in background)")
 
         return {'RUNNING_MODAL'}
 
@@ -5545,7 +5545,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
         if numpy_version:
             return context.window_manager.invoke_confirm(self, event)
         else:
-            self.report({'ERROR'}, "numpy が見つかりません")
+            self.report({'ERROR'}, "numpy not found")
             return {'CANCELLED'}
 
     def cancel(self, context):
@@ -5660,9 +5660,9 @@ print("\\nTest completed")
                 pass
             
             if returncode == 0:
-                self.report({'INFO'}, "外部Pythonテストが成功しました")
+                self.report({'INFO'}, "External Python test succeeded")
             else:
-                self.report({'WARNING'}, "外部Pythonテストで問題が検出されました")
+                self.report({'WARNING'}, "External Python test detected issues")
             
             return {'FINISHED'}
         
