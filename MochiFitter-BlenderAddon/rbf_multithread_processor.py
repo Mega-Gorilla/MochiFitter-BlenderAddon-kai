@@ -12,7 +12,6 @@ python rbf_multithread_processor.py temp_rbf_data.npz
 - numpy
 - scipy
 - concurrent.futures (標準ライブラリ)
-- psutil (メモリモニタリング用)
 """
 
 import numpy as np
@@ -28,14 +27,6 @@ from scipy.sparse import csc_matrix  # 将来のコンパクト台RBF用（現�
 from scipy.sparse.linalg import gmres, LinearOperator  # spilu は対角前処理に変更のため削除
 from typing import Tuple, List, Dict, Any
 
-# psutilの可用性をチェック
-try:
-    import psutil
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
-    #print("警告: psutilがインストールされていません。メモリ監視機能は無効になります。")
-    #print("インストールするには: pip install psutil")
 
 # Numbaの可用性をチェック（オプショナル高速化）
 try:
@@ -50,74 +41,36 @@ except ImportError:
         return decorator
     prange = range
 
-def set_cpu_affinity():
-    """プロセスのCPU親和性を設定して全コアを活用"""
-    try:
-        # 全論理プロセッサを使用
-        all_cpus = list(range(psutil.cpu_count(logical=True)))
-        psutil.Process().cpu_affinity(all_cpus)
-        print(f"CPU親和性を設定: {len(all_cpus)}個の論理プロセッサを使用")
-    except Exception as e:
-        print(f"CPU親和性設定に失敗: {e}")
 
 class MemoryMonitor:
-    """メモリ使用量を監視するクラス（psutil依存）"""
-    
+    """メモリ監視用ダミークラス（後方互換性のため残置）"""
+
     def __init__(self, max_memory_gb: float = None):
-        if not PSUTIL_AVAILABLE:
-            self.enabled = False
-            self.initial_memory = 0.0
-            return
-        
-        self.enabled = True
-        self.process = psutil.Process()
-        self.max_memory_bytes = max_memory_gb * 1024**3 if max_memory_gb else None
-        self.initial_memory = self.get_memory_usage()
-        
+        self.enabled = False
+        self.initial_memory = 0.0
+
     def get_memory_usage(self) -> float:
-        """現在のメモリ使用量をGB単位で取得"""
-        if not self.enabled:
-            return 0.0
-        return self.process.memory_info().rss / 1024**3
-    
+        """常に0を返す"""
+        return 0.0
+
     def get_memory_increase(self) -> float:
-        """初期状態からのメモリ増加量をGB単位で取得"""
-        if not self.enabled:
-            return 0.0
-        return self.get_memory_usage() - self.initial_memory
-    
+        """常に0を返す"""
+        return 0.0
+
     def is_memory_limit_exceeded(self) -> bool:
-        """メモリ制限を超えているかチェック"""
-        if not self.enabled or self.max_memory_bytes is None:
-            return False
-        return self.process.memory_info().rss > self.max_memory_bytes
-    
+        """常にFalseを返す"""
+        return False
+
     def get_recommended_batch_size(self, current_batch_size: int, memory_increase: float) -> int:
-        """メモリ使用量に基づいて推奨バッチサイズを計算"""
-        if not self.enabled:
-            return current_batch_size
-        
-        if memory_increase > 2.0:  # 2GB以上増加した場合
-            return max(1000, current_batch_size // 4)
-        elif memory_increase > 1.0:  # 1GB以上増加した場合
-            return max(5000, current_batch_size // 2)
-        else:
-            return current_batch_size
+        """バッチサイズをそのまま返す"""
+        return current_batch_size
 
 
-def get_optimal_worker_count(total_items: int, memory_monitor: MemoryMonitor) -> int:
+def get_optimal_worker_count(total_items: int, memory_monitor: MemoryMonitor = None) -> int:
     """最適なワーカー数を計算（プロセスプール用に調整）"""
     # CPUコア数を取得
     cpu_count = os.cpu_count()
-    
-    # psutilが利用可能な場合のみメモリベースの調整を行う
-    if PSUTIL_AVAILABLE:
-        # メモリ使用量に基づいて調整
-        available_memory = psutil.virtual_memory().available / 1024**3  # GB単位
-    else:
-        # psutilが利用できない場合は保守的な値を使用
-        available_memory = 8.0  # 8GBと仮定
-    
+
     # プロセスプールでは各プロセスがメモリを独立して使用するため、より保守的に設定
     if total_items > 1000000:  # 100万頂点以上
         max_workers = min(cpu_count, 3)  # ThreadPoolよりも少なく設定
@@ -125,15 +78,7 @@ def get_optimal_worker_count(total_items: int, memory_monitor: MemoryMonitor) ->
         max_workers = min(cpu_count, 4)
     else:
         max_workers = min(cpu_count, 6)
-    
-    # 利用可能メモリに基づいて調整（プロセスプール用により厳しく）
-    if available_memory < 4.0:  # 4GB未満
-        max_workers = min(max_workers, 1)
-    elif available_memory < 8.0:  # 8GB未満
-        max_workers = min(max_workers, 2)
-    elif available_memory < 16.0:  # 16GB未満
-        max_workers = min(max_workers, 4)
-    
+
     return max(1, max_workers)
 
 
@@ -361,12 +306,9 @@ def calculate_optimal_batch_size(num_control_pts: int, max_workers: int,
     MIN_BATCH_SIZE = 1000     # 下限（小さすぎると通信オーバーヘッド増加）
     MAX_BATCH_SIZE = 20000    # 上限（大きすぎるとメモリ断片化リスク）
 
-    # 利用可能メモリを取得
+    # 利用可能メモリを取得（固定値を使用）
     if available_memory_gb is None:
-        if PSUTIL_AVAILABLE:
-            available_memory_gb = psutil.virtual_memory().available / 1024**3
-        else:
-            available_memory_gb = 8.0  # デフォルト8GB
+        available_memory_gb = 8.0  # デフォルト8GB
 
     # バッチあたりメモリ使用量の推定
     # - 距離行列: batch_size × num_control_pts × 4 bytes (float32)
@@ -497,13 +439,9 @@ def compute_distances_to_source_mesh(target_vertices: np.ndarray, source_vertice
                 processed_count += (end_idx - start_idx)
                 progress_percent = (processed_count / num_target) * 100
                 
-                # プロセスプールでの進捗表示（メモリ監視は各プロセスで独立）
+                # プロセスプールでの進捗表示
                 if processed_count % (batch_size * 5) == 0 or processed_count == num_target:
-                    if memory_monitor.enabled:
-                        current_memory = memory_monitor.get_memory_usage()
-                        print(f"距離計算進捗: {processed_count:,}/{num_target:,} 頂点処理完了 ({progress_percent:.1f}%) [メインプロセスメモリ: {current_memory:.1f}GB]")
-                    else:
-                        print(f"距離計算進捗: {processed_count:,}/{num_target:,} 頂点処理完了 ({progress_percent:.1f}%)")
+                    print(f"距離計算進捗: {processed_count:,}/{num_target:,} 頂点処理完了 ({progress_percent:.1f}%)")
                 
             except Exception as exc:
                 batch_data = future_to_batch[future]
@@ -804,12 +742,7 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
                     progress_percent = (processed_count / total_vertices) * 100
 
                     if processed_count % (batch_size * 20) == 0 or processed_count == total_vertices:
-                        if memory_monitor.enabled:
-                            current_memory = memory_monitor.get_memory_usage()
-                            print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 "
-                                  f"({progress_percent:.1f}%) [メモリ: {current_memory:.1f}GB]")
-                        else:
-                            print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%)")
+                        print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%)")
 
                 except Exception as exc:
                     batch_start_idx = future_to_idx[future]
@@ -869,13 +802,9 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
                     processed_count += (end_idx - start_idx)
                     progress_percent = (processed_count / total_vertices) * 100
 
-                    # プロセスプールでの進捗表示（メモリ監視は各プロセスで独立）
+                    # プロセスプールでの進捗表示
                     if processed_count % (batch_size * 20) == 0 or processed_count == total_vertices:
-                        if memory_monitor.enabled:
-                            current_memory = memory_monitor.get_memory_usage()
-                            print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%) [メインプロセスメモリ: {current_memory:.1f}GB]")
-                        else:
-                            print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%)")
+                        print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%)")
 
                 except Exception as exc:
                     batch_data = future_to_batch[future]
@@ -897,12 +826,6 @@ def rbf_interpolation_multithread(source_control_points: np.ndarray,
 
     # Note: BLAS スレッド数は固定値（2）のまま維持（処理後に戻す必要なし）
 
-    if memory_monitor.enabled:
-        final_memory = memory_monitor.get_memory_usage()
-        print(f"最終メモリ使用量: {final_memory:.1f}GB (増加: {memory_monitor.get_memory_increase():.1f}GB)")
-    else:
-        print("最終メモリ使用量: psutilが利用できないため表示できません")
-    
     return target_displacements, np.array(final_displacements)
 
 
@@ -1238,9 +1161,6 @@ def main():
     if args.use_gmres:
         USE_GMRES_SOLVER = True
 
-    if PSUTIL_AVAILABLE:
-        set_cpu_affinity()
-
     # 低メモリモードの場合、設定を調整（プロセスプール用）
     if args.low_memory:
         print("低メモリモードが有効です。バッチサイズとプロセス数を制限します。")
@@ -1262,21 +1182,7 @@ def main():
         print("BLAS スレッド数: 線形システム求解後に制限予定")
     
     np.__config__.show()
-    
-    # メモリ使用量の情報を表示（psutil利用可能時のみ）
-    if PSUTIL_AVAILABLE:
-        memory_info = psutil.virtual_memory()
-        print(f"システムメモリ情報:")
-        print(f"  総メモリ: {memory_info.total / 1024**3:.1f}GB")
-        print(f"  利用可能メモリ: {memory_info.available / 1024**3:.1f}GB")
-        print(f"  メモリ使用率: {memory_info.percent:.1f}%")
-        if args.memory_limit:
-            print(f"  設定メモリ制限: {args.memory_limit:.1f}GB")
-    else:
-        print("システムメモリ情報: psutilが利用できないため表示できません")
-        if args.memory_limit:
-            print(f"設定メモリ制限: {args.memory_limit:.1f}GB")
-    
+
     if args.single_file:
         print(f"単一ファイル処理モード")
         if not os.path.exists(args.temp_file):
