@@ -23,8 +23,8 @@ try:
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
-    print("警告: scipyが見つかりません。一部の機能が制限されます。")
-    print("NumPy・SciPy再インストールボタンを使用してインストールしてください。")
+    print("Warning: scipy not found. Some features will be limited.")
+    print("Please use the NumPy/SciPy reinstall button to install.")
 
 print(f"SciPy available: {SCIPY_AVAILABLE}")
 
@@ -605,7 +605,7 @@ def get_vertices_in_scaled_bbox(source_obj, scale_factor=1.2):
             bounds_min.z <= world_pos.z <= bounds_max.z):
             vertices_in_bbox.append(i)
     
-    print(f"スケールされたBounding Box内の頂点数: {len(vertices_in_bbox)}")
+    print(f"Number of vertices in scaled Bounding Box: {len(vertices_in_bbox)}")
     return vertices_in_bbox
 
 
@@ -643,12 +643,12 @@ def calculate_target_bounding_box(target_obj, scale_factor=1.2, use_selected_ver
             selected_vertices = [v for v in bm.verts if v.select]
             
             if not selected_vertices:
-                print("警告: 選択された頂点がありません。全ての頂点を使用します。")
+                print("Warning: No vertices selected. Using all vertices.")
                 # 選択された頂点がない場合は全ての頂点を使用
                 vertices_world = [matrix_world @ Vector(v.co) for v in bm.verts]
             else:
                 vertices_world = [matrix_world @ Vector(v.co) for v in selected_vertices]
-                print(f"選択された頂点数: {len(selected_vertices)}")
+                print(f"Number of selected vertices: {len(selected_vertices)}")
             
             # bmeshの更新（必須ではないが推奨）
             bmesh.update_edit_mesh(target_obj.data)
@@ -664,7 +664,7 @@ def calculate_target_bounding_box(target_obj, scale_factor=1.2, use_selected_ver
         depsgraph = bpy.context.evaluated_depsgraph_get()
         target_eval = target_obj.evaluated_get(depsgraph)
         vertices_world = [matrix_world @ Vector(v.co) for v in target_eval.data.vertices]
-        print(f"全ての頂点を使用: {len(vertices_world)}個")
+        print(f"Using all vertices: {len(vertices_world)}")
     
     if not vertices_world:
         raise ValueError("ターゲットメッシュに有効な頂点がありません")
@@ -698,12 +698,12 @@ def calculate_target_bounding_box(target_obj, scale_factor=1.2, use_selected_ver
         center.z + scaled_half_size
     ))
     
-    vertex_type = "選択された頂点" if use_selected_vertices else "全ての頂点"
-    print(f"使用した頂点: {vertex_type} ({len(vertices_world)}個)")
-    print(f"ターゲットメッシュの元の寸法: {dimensions}")
-    print(f"最大寸法: {max_dimension:.4f}")
-    print(f"スケール後の正方形サイズ: {max_dimension * scale_factor:.4f}")
-    print(f"生成されたBounding Box: Min{bounds_min}, Max{bounds_max}")
+    vertex_type = "selected vertices" if use_selected_vertices else "all vertices"
+    print(f"Vertices used: {vertex_type} ({len(vertices_world)})")
+    print(f"Original dimensions of target mesh: {dimensions}")
+    print(f"Maximum dimension: {max_dimension:.4f}")
+    print(f"Scaled square size: {max_dimension * scale_factor:.4f}")
+    print(f"Generated Bounding Box: Min{bounds_min}, Max{bounds_max}")
     
     return bounds_min, bounds_max
 
@@ -907,15 +907,15 @@ def create_adaptive_deformation_field(target_obj, base_grid_spacing=0.005, surfa
     
     if not vertices:
         bm.free()
-        print("警告: 指定された範囲内に有効なポイントが見つかりませんでした")
+        print("Warning: No valid points found in specified range")
         return None
-    
+
     # クリーンアップ
     bm.free()
-    
+
     end_time = time.time()
-    print(f"生成されたポイント数: {len(vertices)}")
-    print(f"処理時間: {end_time - start_time:.2f}秒")
+    print(f"Number of generated points: {len(vertices)}")
+    print(f"Processing time: {end_time - start_time:.2f} seconds")
     return vertices
 
 
@@ -948,7 +948,7 @@ def compute_distances_to_source_mesh(target_vertices, source_obj):
     num_vertices = len(target_vertices)
     distances = np.zeros(num_vertices)
     
-    print("ソースメッシュのBVHツリーを構築中...")
+    print("Building BVH tree for source mesh...")
     
     # ソースメッシュからBVHツリーを構築
     bm_source = bmesh.new()
@@ -962,7 +962,7 @@ def compute_distances_to_source_mesh(target_vertices, source_obj):
     # BVHツリーを構築
     source_bvh = BVHTree.FromBMesh(bm_source)
     
-    print("各頂点の最近接面までの距離を計算中...")
+    print("Calculating distance to nearest face for each vertex...")
     for i, vertex in enumerate(target_vertices):
         # BVHツリーを使用して最近接点と距離を計算
         closest_point, closest_normal, closest_face_idx, distance = source_bvh.find_nearest(vertex)
@@ -976,7 +976,7 @@ def compute_distances_to_source_mesh(target_vertices, source_obj):
     # bmeshを解放
     bm_source.free()
     
-    print("距離計算完了")
+    print("Distance calculation complete")
     return distances
 
 
@@ -1107,8 +1107,8 @@ def add_normal_control_points_func(source_obj, control_indices, control_position
     extended_original = np.array([[p[0], p[1], p[2]] for p in extended_original])
     extended_deformed = np.array([[p[0], p[1], p[2]] for p in extended_deformed])
     
-    direction_text = "内側" if normal_distance < 0 else "外側"
-    print(f"制御点を拡張: {len(control_indices)} → {len(extended_original)} (法線方向{direction_text}に{abs(normal_distance):.5f}mの制御点を追加)")
+    direction_text = "inward" if normal_distance < 0 else "outward"
+    print(f"Extended control points: {len(control_indices)} -> {len(extended_original)} (added control points {abs(normal_distance):.5f}m {direction_text} along normals)")
     
     return extended_original, extended_deformed
 
@@ -1120,7 +1120,7 @@ def falloff_displacements(target_vertices, target_displacements, source_obj):
     num_vertices = len(target_vertices)
     
     # 各頂点のソースメッシュの最近接面までの距離を計算
-    print("ソースメッシュまでの距離を計算中...")
+    print("Calculating distance to source mesh...")
     distances = compute_distances_to_source_mesh(target_vertices, source_obj)
     
     # 距離に基づく重み付け
@@ -1178,7 +1178,7 @@ def rbf_interpolation(source_control_points, source_control_points_deformed, tar
         dists = cdist(source_control_points, source_control_points)
         mean_dist = np.mean(dists[dists > 0])
         epsilon = mean_dist  # 平均距離をepsilonとして使用
-        print(f"自動計算されたepsilon: {epsilon}")
+        print(f"Auto-calculated epsilon: {epsilon}")
     
     # 制御点間の距離行列を計算
     dist_matrix = cdist(source_control_points, source_control_points)
@@ -1206,7 +1206,7 @@ def rbf_interpolation(source_control_points, source_control_points_deformed, tar
         x = np.linalg.solve(A, b)
     except np.linalg.LinAlgError:
         # 行列が特異な場合、正則化して疑似逆行列を使用
-        print("行列が特異です - 正則化を適用します")
+        print("Matrix is singular - applying regularization")
         reg = np.eye(A.shape[0]) * 1e-6
         x = np.linalg.lstsq(A + reg, b, rcond=None)[0]
     
@@ -1223,7 +1223,7 @@ def rbf_interpolation(source_control_points, source_control_points_deformed, tar
     target_displacements = np.zeros_like(target_vertices)
     
     # バッチごとに処理
-    print(f"ターゲットメッシュの頂点を {batch_size} 頂点ずつバッチ処理します（全 {total_vertices} 頂点）")
+    print(f"Processing target mesh vertices in batches of {batch_size} (total {total_vertices} vertices)")
     
     # 進捗表示用のカウンター
     processed_count = 0
@@ -1233,7 +1233,7 @@ def rbf_interpolation(source_control_points, source_control_points_deformed, tar
         batch_end = min(batch_start + batch_size, total_vertices)
         current_batch_size = batch_end - batch_start
         
-        print(f"バッチ処理中: {batch_start} から {batch_end-1} まで（{current_batch_size}頂点）")
+        print(f"Processing batch: {batch_start} to {batch_end-1} ({current_batch_size} vertices)")
         
         # 現在のバッチの座標
         batch_world_vertices = target_vertices[batch_start:batch_end]
@@ -1268,9 +1268,9 @@ def rbf_interpolation(source_control_points, source_control_points_deformed, tar
         # 進捗を更新
         processed_count += current_batch_size
         progress_percent = (processed_count / total_vertices) * 100
-        print(f"進捗: {processed_count}/{total_vertices} 頂点処理完了 ({progress_percent:.1f}%)")
-    
-    print("すべてのバッチ処理が完了しました")
+        print(f"Progress: {processed_count}/{total_vertices} vertices processed ({progress_percent:.1f}%)")
+
+    print("All batch processing complete")
     return target_deformed, target_world_vertices, target_displacements
 
 
@@ -1299,7 +1299,7 @@ def ensure_objects_visible(objects_to_check):
         
         # 非表示の場合は表示状態にする
         if obj.hide_viewport:
-            print(f"オブジェクト '{obj.name}' を表示状態にしました")
+            print(f"Made object '{obj.name}' visible")
             obj.hide_viewport = False
         
         if obj.hide_render:
@@ -1331,7 +1331,7 @@ def restore_objects_visibility(objects_to_restore, original_states):
         obj.hide_select = state['hide_select']
         
         if state['hide_viewport']:
-            print(f"オブジェクト '{obj.name}' の表示状態を元に戻しました")
+            print(f"Restored visibility state of object '{obj.name}'")
     
     bpy.context.view_layer.update()
 
@@ -1370,7 +1370,7 @@ def remove_overlapping_vertices(vertices, tolerance=1e-6):
     # 重複のない頂点のインデックスを取得
     unique_indices = np.where(~duplicate_mask)[0]
     
-    print(f"総制御点数: {len(vertices)}, 重複除去後: {len(unique_indices)}, 除去された重複点: {len(duplicate_indices)}")
+    print(f"Total control points: {len(vertices)}, after deduplication: {len(unique_indices)}, removed duplicates: {len(duplicate_indices)}")
     
     return unique_indices, duplicate_mask
 
@@ -1409,7 +1409,7 @@ def identify_overlapping_control_points_for_shape_keys(
     try:
         # シェイプキー値0と1での制御点位置をチェック
         for shape_key_value in [0.0, 1.0]:
-            print(f"シェイプキー値 {shape_key_value} での重複チェック")
+            print(f"Checking for duplicates at shape key value {shape_key_value}")
             
             # シェイプキー値を設定
             source_obj.data.shape_keys.key_blocks[source_shape_key_name].value = shape_key_value
@@ -1449,7 +1449,7 @@ def identify_overlapping_control_points_for_shape_keys(
             duplicate_indices = np.where(duplicate_mask)[0]
             overlapping_indices_set.update(duplicate_indices)
             
-            print(f"シェイプキー値 {shape_key_value} で {len(duplicate_indices)} 個の重複制御点を検出")
+            print(f"Detected {len(duplicate_indices)} duplicate control points at shape key value {shape_key_value}")
     
     finally:
         # 元のシェイプキー値に戻す
@@ -1457,7 +1457,7 @@ def identify_overlapping_control_points_for_shape_keys(
         bpy.context.view_layer.update()
     
     overlapping_indices = np.array(sorted(list(overlapping_indices_set)))
-    print(f"総重複制御点数（全ステップで除外対象）: {len(overlapping_indices)}")
+    print(f"Total duplicate control points (to be excluded from all steps): {len(overlapping_indices)}")
     
     return overlapping_indices
 
@@ -1501,7 +1501,7 @@ def create_shape_key_from_rbf(source_obj, source_shape_key_name, selected_only=T
         
         for invert in directions:
             direction_suffix = "_inv" if invert else ""
-            print(f"\n=== {'逆' if invert else '通常'}変形の処理開始 ===")
+            print(f"\n=== Starting {'inverse' if invert else 'normal'} deformation processing ===")
             
             # フィールドデータの保存パスを自動生成
             scene_folder = get_scene_folder()
@@ -1566,13 +1566,13 @@ def create_shape_key_from_rbf(source_obj, source_shape_key_name, selected_only=T
                 selected_indices = get_vertices_in_scaled_bbox(source_obj, bpy.context.scene.rbf_bbox_scale_factor)
                 
                 if len(selected_indices) < 4:
-                    print(f"警告: 制御点が非常に少ないです（{len(selected_indices)}個）。より多くの制御点を選択することをお勧めします。")
+                    print(f"Warning: Very few control points ({len(selected_indices)}). Consider selecting more control points.")
             else:
                 # すべての頂点を使用
                 selected_indices = list(range(len(source_obj.data.vertices)))
             
             # シェイプキー値0と1での重複制御点を事前に特定
-            print("シェイプキー値0と1での重複制御点を事前チェック中...")
+            print("Pre-checking for duplicate control points at shape key values 0 and 1...")
             overlapping_indices = identify_overlapping_control_points_for_shape_keys(
                 source_obj, 
                 source_shape_key_name, 
@@ -1587,7 +1587,7 @@ def create_shape_key_from_rbf(source_obj, source_shape_key_name, selected_only=T
             all_target_world_vertices = []
             
             for step in range(num_steps):
-                print(f"\n=== ステップ {step+1}/{num_steps} ===")
+                print(f"\n=== Step {step+1}/{num_steps} ===")
                 
                 # 現在のステップの値を計算
                 progress = (step + 1) / num_steps
@@ -1598,18 +1598,18 @@ def create_shape_key_from_rbf(source_obj, source_shape_key_name, selected_only=T
                     # 通常モードでは開始値から終了値へ変化
                     step_value = shape_key_start_value + (shape_key_end_value - shape_key_start_value) * progress
                 
-                print(f"シェイプキー値: {step_value}")
+                print(f"Shape key value: {step_value}")
                 
                 # 頂点グループに基づいて制御点をフィルタリング
                 filtered_indices = filter_control_points_by_vertex_groups(source_obj, selected_indices, step_value)
                 
                 if len(filtered_indices) < 4:
-                    print(f"警告: ステップ {step+1} で有効な制御点が非常に少ないです（{len(filtered_indices)}個）。")
+                    print(f"Warning: Very few valid control points at step {step+1} ({len(filtered_indices)}).")
                     if len(filtered_indices) == 0:
-                        print(f"ステップ {step+1} をスキップします：有効な制御点がありません。")
+                        print(f"Skipping step {step+1}: No valid control points.")
                         continue
                 
-                print(f"制御点数: {len(selected_indices)} → {len(filtered_indices)} (頂点グループフィルタリング後)")
+                print(f"Control points: {len(selected_indices)} -> {len(filtered_indices)} (after vertex group filtering)")
                 
                 # 変形前の状態を取得（バウンディングボックス計算用）
                 current_basis_local = np.array([evaluated_source.data.vertices[i].co.copy() for i in filtered_indices])
@@ -1622,7 +1622,7 @@ def create_shape_key_from_rbf(source_obj, source_shape_key_name, selected_only=T
                     current_basis[i] = np.array([world_basis[0], world_basis[1], world_basis[2]])
                 
                 # 現在のステップでのフィールドを生成（変形前のソースオブジェクトを使用）
-                print(f"ステップ {step+1} のDeformation Fieldを生成中...")
+                print(f"Generating Deformation Field for step {step+1}...")
                 field_vertices = create_adaptive_deformation_field(
                     target_obj=source_obj,
                     base_grid_spacing=bpy.context.scene.rbf_base_grid_spacing,
@@ -1635,7 +1635,7 @@ def create_shape_key_from_rbf(source_obj, source_shape_key_name, selected_only=T
                 )
                 
                 if field_vertices is None:
-                    print(f"ステップ {step+1} でフィールドの生成に失敗しました")
+                    print(f"Failed to generate field at step {step+1}")
                     continue
                 
                 # シェイプキーの値を更新して変形後の状態を取得
@@ -1673,7 +1673,7 @@ def create_shape_key_from_rbf(source_obj, source_shape_key_name, selected_only=T
                 
                 # 事前に特定された重複制御点を除外
                 if len(overlapping_indices) > 0:
-                    print(f"事前に特定された {len(overlapping_indices)} 個の重複制御点を除外")
+                    print(f"Excluding {len(overlapping_indices)} pre-identified duplicate control points")
                     # 重複していない制御点のインデックスを取得
                     all_indices = np.arange(len(current_basis_extended))
                     valid_indices = np.setdiff1d(all_indices, overlapping_indices)
@@ -1681,18 +1681,18 @@ def create_shape_key_from_rbf(source_obj, source_shape_key_name, selected_only=T
                     if len(valid_indices) < len(current_basis_extended):
                         current_basis_extended = current_basis_extended[valid_indices]
                         current_deformed_extended = current_deformed_extended[valid_indices]
-                        print(f"重複制御点を除外しました: {len(valid_indices)}個の制御点を使用")
+                        print(f"Excluded duplicate control points: using {len(valid_indices)} control points")
                 
                 # 変位の最大値をチェック
                 displacements = current_deformed_extended - current_basis_extended
                 max_disp = np.max(np.linalg.norm(displacements, axis=1))
-                print(f"制御点の最大変位: {max_disp}")
+                print(f"Maximum control point displacement: {max_disp}")
                 
                 # selected_onlyの場合、フォールオフ用の部分メッシュを作成
                 falloff_source_obj = None
                 if selected_only and original_selected_vertices:
                     falloff_source_obj = create_partial_mesh_from_vertices(source_obj, original_selected_vertices)
-                    print(f"フォールオフ用部分メッシュを作成しました（{len(original_selected_vertices)}個の頂点）")
+                    print(f"Created partial mesh for falloff ({len(original_selected_vertices)} vertices)")
                 
                 # RBF補間を実行
                 target_deformed, target_world_vertices, target_displacements = rbf_interpolation(
@@ -1710,13 +1710,13 @@ def create_shape_key_from_rbf(source_obj, source_shape_key_name, selected_only=T
                     mesh_data = falloff_source_obj.data
                     bpy.data.objects.remove(falloff_source_obj, do_unlink=True)
                     bpy.data.meshes.remove(mesh_data)
-                    print("フォールオフ用部分メッシュを削除しました")
+                    print("Deleted partial mesh for falloff")
                 
                 # 結果を保存
                 all_target_world_vertices.append(target_world_vertices)
                 all_displacements.append(target_displacements)
                 
-                print(f"ステップ {step+1} の変位計算完了")
+                print(f"Step {step+1} displacement calculation complete")
             
             # シェイプキーの値を元に戻す
             for key_name, value in original_values.items():
@@ -1725,7 +1725,7 @@ def create_shape_key_from_rbf(source_obj, source_shape_key_name, selected_only=T
             # シーンを更新
             bpy.context.view_layer.update()
             
-            print(f"制御点として最大 {len(current_basis_extended)} 個の頂点を使用しました")
+            print(f"Used maximum of {len(current_basis_extended)} vertices as control points")
             
             # Deformation Fieldデータを保存
             # 最初のフィールドオブジェクトを基準として使用
@@ -1737,7 +1737,7 @@ def create_shape_key_from_rbf(source_obj, source_shape_key_name, selected_only=T
                 old_version=False,
                 enable_x_mirror=bpy.context.scene.rbf_enable_x_mirror
             )
-            print(f"Deformation Fieldデータを保存しました: {field_data_path}")
+            print(f"Saved Deformation Field data: {field_data_path}")
             
             # 結果をリストに追加
             results.append({
@@ -1793,11 +1793,11 @@ def save_field_data_multi_step(filepath, all_field_points, all_delta_positions, 
                 filtered_field_points.append(filtered_field.astype(np.float32))
                 filtered_delta_positions.append(filtered_delta.astype(np.float32))
                 
-                print(f"ステップ {step+1}: 元の頂点数 {len(field_points)} → フィルタ後 {len(filtered_field)}")
+                print(f"Step {step+1}: original vertices {len(field_points)} -> after filter {len(filtered_field)}")
             else:
                 filtered_field_points.append(np.array([]))
                 filtered_delta_positions.append(np.array([]))
-                print(f"ステップ {step+1}: フィールド頂点数 0")
+                print(f"Step {step+1}: field vertex count 0")
         
         # フィルタ後のデータを使用
         all_field_points = filtered_field_points
@@ -1814,11 +1814,11 @@ def save_field_data_multi_step(filepath, all_field_points, all_delta_positions, 
             if len(field_points) > 0:
                 filtered_field_points.append(field_points.astype(np.float32))
                 filtered_delta_positions.append(delta_positions.astype(np.float32))
-                print(f"ステップ {step+1}: 頂点数 {len(field_points)} (ミラーフィルタなし)")
+                print(f"Step {step+1}: vertex count {len(field_points)} (no mirror filter)")
             else:
                 filtered_field_points.append(np.array([]))
                 filtered_delta_positions.append(np.array([]))
-                print(f"ステップ {step+1}: フィールド頂点数 0")
+                print(f"Step {step+1}: field vertex count 0")
         
         # キャスト後のデータを使用
         all_field_points = filtered_field_points
@@ -1835,11 +1835,11 @@ def save_field_data_multi_step(filepath, all_field_points, all_delta_positions, 
              rbf_smoothing=rbf_smoothing,
              enable_x_mirror=enable_x_mirror)
     
-    print(f"Deformation Field差分データを保存しました: {filepath}")
-    print(f"ステップ数: {num_steps}")
+    print(f"Saved Deformation Field differential data: {filepath}")
+    print(f"Number of steps: {num_steps}")
     for step in range(num_steps):
-        print(f"ステップ {step+1}: 頂点数 {len(all_field_points[step])}")
-    print(f"RBF関数: multi_quadratic_biharmonic, epsilon: {rbf_epsilon}, smoothing: {rbf_smoothing}")
+        print(f"Step {step+1}: vertex count {len(all_field_points[step])}")
+    print(f"RBF function: multi_quadratic_biharmonic, epsilon: {rbf_epsilon}, smoothing: {rbf_smoothing}")
 
 
 def get_vertex_groups_and_weights(mesh_obj, vertex_index):
@@ -1954,11 +1954,11 @@ def apply_field_data(target_obj, field_data_path, shape_key_name="RBFDeform"):
         all_field_points = data['all_field_points']
         all_delta_positions = data['all_delta_positions']
         num_steps = int(data.get('num_steps', len(all_delta_positions)))
-        print(f"複数ステップのデータ（新形式）を検出: {num_steps}ステップ")
-        
+        print(f"Detected multi-step data (new format): {num_steps} steps")
+
         # ミラー設定を確認（データに含まれていない場合はそのまま使用）
         enable_x_mirror = data.get('enable_x_mirror', False)
-        print(f"X軸ミラー設定: {'有効' if enable_x_mirror else '無効'}")
+        print(f"X-axis mirror setting: {'enabled' if enable_x_mirror else 'disabled'}")
         
         if enable_x_mirror:
             # X軸ミラーリング：X座標が0より大きいデータを負に反転してミラーデータを追加
@@ -1988,24 +1988,24 @@ def apply_field_data(target_obj, field_data_path, shape_key_name="RBFDeform"):
                         mirrored_field_points.append(combined_field_points)
                         mirrored_delta_positions.append(combined_delta_positions)
                         
-                        print(f"ステップ {step+1}: 元の頂点数 {len(field_points)} → ミラー適用後 {len(combined_field_points)}")
+                        print(f"Step {step+1}: original vertices {len(field_points)} -> after mirror {len(combined_field_points)}")
                     else:
                         mirrored_field_points.append(field_points)
                         mirrored_delta_positions.append(delta_positions)
-                        print(f"ステップ {step+1}: フィールド頂点数 {len(field_points)} (ミラー対象なし)")
+                        print(f"Step {step+1}: field vertex count {len(field_points)} (no mirror targets)")
                 else:
                     mirrored_field_points.append(field_points)
                     mirrored_delta_positions.append(delta_positions)
-                    print(f"ステップ {step+1}: フィールド頂点数 0")
+                    print(f"Step {step+1}: field vertex count 0")
             
             # ミラー適用後のデータを使用
             all_field_points = mirrored_field_points
             all_delta_positions = mirrored_delta_positions
         else:
             # ミラーが無効の場合、元のデータをそのまま使用
-            print("X軸ミラーリングが無効のため、元のデータをそのまま使用します")
+            print("X-axis mirroring is disabled, using original data")
             for step in range(num_steps):
-                print(f"ステップ {step+1}: フィールド頂点数 {len(all_field_points[step])}")
+                print(f"Step {step+1}: field vertex count {len(all_field_points[step])}")
         
     else:
         # 後方互換性のため、単一ステップのデータも処理
@@ -2014,7 +2014,7 @@ def apply_field_data(target_obj, field_data_path, shape_key_name="RBFDeform"):
         all_field_points = [field_points]
         all_delta_positions = [delta_positions]
         num_steps = 1
-        print("単一ステップのデータを検出")
+        print("Detected single-step data")
     
     field_matrix = Matrix(data['world_matrix'])
     field_matrix_inv = field_matrix.inverted()
@@ -2022,7 +2022,7 @@ def apply_field_data(target_obj, field_data_path, shape_key_name="RBFDeform"):
     # RBFパラメータの読み込み
     rbf_epsilon = float(data.get('rbf_epsilon', 0.00001))
     
-    print(f"RBF補間パラメータ: 関数=multi_quadratic_biharmonic, epsilon={rbf_epsilon}")
+    print(f"RBF interpolation parameters: function=multi_quadratic_biharmonic, epsilon={rbf_epsilon}")
     
     # 評価されたメッシュを取得（モディファイア適用後）
     depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -2051,8 +2051,8 @@ def apply_field_data(target_obj, field_data_path, shape_key_name="RBFDeform"):
         field_points = all_field_points[step]
         delta_positions = all_delta_positions[step]
         
-        print(f"ステップ {step+1}/{num_steps} の変形を適用中...")
-        print(f"使用するフィールド頂点数: {len(field_points)}")
+        print(f"Applying deformation for step {step+1}/{num_steps}...")
+        print(f"Number of field vertices to use: {len(field_points)}")
         
         # SciPyの利用可能性をチェック
         if not SCIPY_AVAILABLE:
@@ -2107,12 +2107,12 @@ def apply_field_data(target_obj, field_data_path, shape_key_name="RBFDeform"):
         # このステップの変位を累積変位に追加
         cumulative_displacements += step_displacements
         
-        print(f"ステップ {step+1} 完了: 最大変位 {np.max(np.linalg.norm(step_displacements, axis=1)):.6f}")
+        print(f"Step {step+1} complete: max displacement {np.max(np.linalg.norm(step_displacements, axis=1)):.6f}")
     
     # アーマチュアの取得
     armature_obj = get_armature_from_modifier(target_obj)
     if not armature_obj:
-        print("Armatureモディファイアが見つかりません")
+        print("Armature modifier not found")
     
     # 累積変位を適用して最終的な頂点位置を計算
     results = np.zeros((num_vertices, 3))
@@ -2132,8 +2132,8 @@ def apply_field_data(target_obj, field_data_path, shape_key_name="RBFDeform"):
     for i, local_pos in enumerate(results):
         shape_key.data[i].co = local_pos
     
-    print(f"すべてのステップの累積変形を適用しました: {shape_key_name}")
-    print(f"最終的な累積変位の最大値: {np.max(np.linalg.norm(cumulative_displacements, axis=1)):.6f}")
+    print(f"Applied cumulative deformation from all steps: {shape_key_name}")
+    print(f"Final maximum cumulative displacement: {np.max(np.linalg.norm(cumulative_displacements, axis=1)):.6f}")
 
 
 # プロパティの定義
@@ -2159,7 +2159,7 @@ def create_field_object_from_data(field_data_path, target_step=1, object_name="F
         all_field_points = data['all_field_points']
         all_delta_positions = data['all_delta_positions']
         num_steps = int(data.get('num_steps', len(all_delta_positions)))
-        print(f"複数ステップのデータ（新形式）を検出: {num_steps}ステップ")
+        print(f"Detected multi-step data (new format): {num_steps} steps")
     elif 'field_points' in data and 'all_delta_positions' in data:
         # 旧形式：単一の座標セットが保存されている場合
         field_points = data['field_points']
@@ -2168,7 +2168,7 @@ def create_field_object_from_data(field_data_path, target_step=1, object_name="F
         
         # 旧形式の場合、すべてのステップで同じ座標を使用
         all_field_points = [field_points for _ in range(num_steps)]
-        print(f"複数ステップのデータ（旧形式）を検出: {num_steps}ステップ")
+        print(f"Detected multi-step data (old format): {num_steps} steps")
     else:
         # 後方互換性のため、単一ステップのデータも処理
         field_points = data.get('field_points', data.get('delta_positions', []))
@@ -2176,7 +2176,7 @@ def create_field_object_from_data(field_data_path, target_step=1, object_name="F
         all_field_points = [field_points]
         all_delta_positions = [delta_positions]
         num_steps = 1
-        print("単一ステップのデータを検出")
+        print("Detected single-step data")
     
     # ステップ数の検証
     if target_step < 1 or target_step > num_steps:
@@ -2189,7 +2189,7 @@ def create_field_object_from_data(field_data_path, target_step=1, object_name="F
     if len(field_points) == 0:
         raise ValueError("フィールドポイントが空です")
     
-    print(f"ステップ {target_step}/{num_steps} のフィールドポイント数: {len(field_points)}")
+    print(f"Field point count for step {target_step}/{num_steps}: {len(field_points)}")
     
     # メッシュオブジェクトを作成
     mesh = bpy.data.meshes.new(object_name + "_mesh")
@@ -2201,7 +2201,7 @@ def create_field_object_from_data(field_data_path, target_step=1, object_name="F
         if hasattr(point, '__len__') and len(point) >= 3:
             vertices.append([point[0], point[1], point[2]])
         else:
-            print(f"警告: 無効なポイントデータ: {point}")
+            print(f"Warning: Invalid point data: {point}")
     
     if not vertices:
         raise ValueError("有効な頂点が見つかりません")
@@ -2227,7 +2227,7 @@ def create_field_object_from_data(field_data_path, target_step=1, object_name="F
     delta_count = len(target_delta_positions)
     
     if field_count != delta_count:
-        print(f"警告: ステップ {target_step} でフィールドポイント数({field_count})と変位数({delta_count})が不一致")
+        print(f"Warning: Field point count ({field_count}) and displacement count ({delta_count}) mismatch at step {target_step}")
     else:
         # シェイプキーに変位を適用
         for i in range(min(len(vertices), len(target_delta_positions))):
@@ -2243,16 +2243,16 @@ def create_field_object_from_data(field_data_path, target_step=1, object_name="F
                         original_pos[2] + displacement[2]
                     ]
                 else:
-                    print(f"警告: ステップ {target_step} の変位データが無効: インデックス {i}")
+                    print(f"Warning: Invalid displacement data at step {target_step}: index {i}")
         
-        print(f"シェイプキー '{step_name}' を作成: {len(target_delta_positions)} 変位")
+        print(f"Created shape key '{step_name}': {len(target_delta_positions)} displacements")
     
     # オブジェクトを選択してアクティブにする
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
     
-    print(f"フィールドオブジェクト '{object_name}' を作成しました")
-    print(f"頂点数: {len(vertices)}, 対象ステップ: {target_step}/{num_steps}")
+    print(f"Created field object '{object_name}'")
+    print(f"Vertex count: {len(vertices)}, target step: {target_step}/{num_steps}")
     
     return obj
 
@@ -2939,12 +2939,12 @@ class CREATE_OT_RBFDeformation(bpy.types.Operator, ExportHelper):
         
         # アバター名の検証
         if not source_avatar_name or not target_avatar_name:
-            self.report({'ERROR'}, "アバター名を設定してください")
+            self.report({'ERROR'}, "Please set avatar name")
             return {'CANCELLED'}
         
         # シェイプキーの値の範囲検証
         if shape_key_start_value == shape_key_end_value:
-            self.report({'ERROR'}, "シェイプキーの開始値と終了値は異なる値を設定してください")
+            self.report({'ERROR'}, "Shape key start and end values must be different")
             return {'CANCELLED'}
         
         default_paths = []
@@ -2987,7 +2987,7 @@ class CREATE_OT_RBFDeformation(bpy.types.Operator, ExportHelper):
                     shutil.copy2(default_paths[1], inv_filepath)
                 filelist.append(self.filepath[:-4] + "_inv.npz")
 
-            self.report({'INFO'}, f"変形データを保存しました: {', '.join(filelist)}")
+            self.report({'INFO'}, f"Deformation data saved: {', '.join(filelist)}")
             return {'FINISHED'}
         
         except Exception as e:
@@ -3037,7 +3037,7 @@ class APPLY_OT_FieldData(bpy.types.Operator):
         source_shape_key_name = scene.rbf_source_shape_key
         
         if not source_avatar_name:
-            self.report({'ERROR'}, "ソースアバター名を指定してください")
+            self.report({'ERROR'}, "Please specify source avatar name")
             return {'CANCELLED'}
         
         # ファイルパスを現在の設定に基づいて生成
@@ -3045,36 +3045,36 @@ class APPLY_OT_FieldData(bpy.types.Operator):
         if save_shape_key_mode:
             # シェイプキー変形モードの場合
             if not source_shape_key_name:
-                self.report({'ERROR'}, "シェイプキー変形モードではシェイプキー名を指定してください")
+                self.report({'ERROR'}, "Please specify shape key name in shape key mode")
                 return {'CANCELLED'}
             field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_shape_{source_shape_key_name}.npz")
-            display_name = f"シェイプキー変形データ"
+            display_name = "Shape key deformation data"
         else:
             # 通常のアバター間変形の場合
             if not target_avatar_name:
-                self.report({'ERROR'}, "ターゲットアバター名を指定してください")
+                self.report({'ERROR'}, "Please specify target avatar name")
                 return {'CANCELLED'}
             field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_to_{target_avatar_name}.npz")
-            display_name = f"アバター間変形データ"
-        
+            display_name = "Inter-avatar deformation data"
+
         if not os.path.exists(field_data_path):
-            self.report({'ERROR'}, f"{display_name}ファイルが見つかりません: {os.path.basename(field_data_path)}")
-            print(f"変形データファイルが見つかりません: {field_data_path}")
+            self.report({'ERROR'}, f"{display_name} file not found: {os.path.basename(field_data_path)}")
+            print(f"Deformation data file not found: {field_data_path}")
             return {'CANCELLED'}
         
         try:
             target_obj = context.active_object
             if not target_obj or target_obj.type != 'MESH':  
-                self.report({'ERROR'}, "メッシュオブジェクトを選択してください")
+                self.report({'ERROR'}, "Please select a Mesh object")
                 return {'CANCELLED'}
             
             shape_key_name = scene.rbf_apply_shape_key_name if scene.rbf_apply_shape_key_name else "RBFDeform"
             apply_field_data(target_obj, field_data_path, shape_key_name)
-            self.report({'INFO'}, f"{display_name}を適用しました: {os.path.basename(field_data_path)}")
+            self.report({'INFO'}, f"{display_name} applied: {os.path.basename(field_data_path)}")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
@@ -3106,22 +3106,22 @@ class SAVE_OT_BasePoseDiff(bpy.types.Operator, ExportHelper):
         
         # アバター名の検証
         if not source_avatar_name:
-            self.report({'ERROR'}, "ソースアバター名を設定してください")
+            self.report({'ERROR'}, "Please set source avatar name")
             return {'CANCELLED'}
         
         if not source_avatar_data_file:
-            self.report({'ERROR'}, "ソースアバターデータファイルを指定してください")
+            self.report({'ERROR'}, "Please specify source avatar data file")
             return {'CANCELLED'}
         
         # アクティブオブジェクトを取得
         active_obj = context.active_object
         if not active_obj:
-            self.report({'ERROR'}, "オブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an object")
             return {'CANCELLED'}
         
         # アクティブオブジェクトがArmatureかチェック
         if active_obj.type != 'ARMATURE':
-            self.report({'ERROR'}, "Armatureオブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an Armature object")
             return {'CANCELLED'}
         
         armature_obj = active_obj
@@ -3143,12 +3143,12 @@ class SAVE_OT_BasePoseDiff(bpy.types.Operator, ExportHelper):
             # 指定された場所に移動
             if saved_filepath != filepath and os.path.abspath(saved_filepath) != os.path.abspath(filepath):
                 shutil.copy2(saved_filepath, filepath)
-            
-            self.report({'INFO'}, f"ベースポーズデータを保存しました: {filepath}")
+
+            self.report({'INFO'}, f"Base pose data saved: {filepath}")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
@@ -3186,22 +3186,22 @@ class APPLY_OT_BasePoseDiff(bpy.types.Operator):
         
         # アバター名の検証
         if not source_avatar_name:
-            self.report({'ERROR'}, "ソースアバター名を設定してください")
+            self.report({'ERROR'}, "Please set source avatar name")
             return {'CANCELLED'}
         
         if not source_avatar_data_file:
-            self.report({'ERROR'}, "ソースアバターデータファイルを指定してください")
+            self.report({'ERROR'}, "Please specify source avatar data file")
             return {'CANCELLED'}
         
         # アクティブオブジェクトを取得
         active_obj = context.active_object
         if not active_obj:
-            self.report({'ERROR'}, "オブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an object")
             return {'CANCELLED'}
         
         # アクティブオブジェクトがArmatureかチェック
         if active_obj.type != 'ARMATURE':
-            self.report({'ERROR'}, "Armatureオブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an Armature object")
             return {'CANCELLED'}
         
         armature_obj = active_obj
@@ -3217,12 +3217,12 @@ class APPLY_OT_BasePoseDiff(bpy.types.Operator):
         
         try:
             add_pose_from_json(pose_filename, avatar_data_filename, invert)
-            action = "逆適用" if invert else "適用"
-            self.report({'INFO'}, f"ベースポーズデータを{action}しました: {pose_filename}")
+            action = "inverse applied" if invert else "applied"
+            self.report({'INFO'}, f"Base pose data {action}: {pose_filename}")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
@@ -3255,22 +3255,22 @@ class SAVE_OT_PoseDiff(bpy.types.Operator, ExportHelper):
         
         # アバター名の検証
         if not source_avatar_name or not target_avatar_name:
-            self.report({'ERROR'}, "アバター名を設定してください")
+            self.report({'ERROR'}, "Please set avatar name")
             return {'CANCELLED'}
         
         if not source_avatar_data_file:
-            self.report({'ERROR'}, "ソースアバターデータファイルを指定してください")
+            self.report({'ERROR'}, "Please specify source avatar data file")
             return {'CANCELLED'}
         
         # アクティブオブジェクトを取得
         active_obj = context.active_object
         if not active_obj:
-            self.report({'ERROR'}, "オブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an object")
             return {'CANCELLED'}
         
         # アクティブオブジェクトがArmatureかチェック
         if active_obj.type != 'ARMATURE':
-            self.report({'ERROR'}, "Armatureオブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an Armature object")
             return {'CANCELLED'}
         
         armature_obj = active_obj
@@ -3292,17 +3292,17 @@ class SAVE_OT_PoseDiff(bpy.types.Operator, ExportHelper):
             # 指定された場所に移動
             if saved_filepath != filepath and os.path.abspath(saved_filepath) != os.path.abspath(filepath):
                 shutil.copy2(saved_filepath, filepath)
-            
-            self.report({'INFO'}, f"ポーズデータを保存しました: {filepath}")
+
+            self.report({'INFO'}, f"Pose data saved: {filepath}")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
             return {'CANCELLED'}
-    
+
     def invoke(self, context, event):
         # デフォルトファイル名を設定
         scene = context.scene
@@ -3337,22 +3337,22 @@ class APPLY_OT_PoseDiff(bpy.types.Operator):
         
         # アバター名の検証
         if not source_avatar_name or not target_avatar_name:
-            self.report({'ERROR'}, "アバター名を設定してください")
+            self.report({'ERROR'}, "Please set avatar name")
             return {'CANCELLED'}
         
         if not source_avatar_data_file:
-            self.report({'ERROR'}, "ソースアバターデータファイルを指定してください")
+            self.report({'ERROR'}, "Please specify source avatar data file")
             return {'CANCELLED'}
         
         # アクティブオブジェクトを取得
         active_obj = context.active_object
         if not active_obj:
-            self.report({'ERROR'}, "オブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an object")
             return {'CANCELLED'}
         
         # アクティブオブジェクトがArmatureかチェック
         if active_obj.type != 'ARMATURE':
-            self.report({'ERROR'}, "Armatureオブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an Armature object")
             return {'CANCELLED'}
         
         armature_obj = active_obj
@@ -3368,12 +3368,12 @@ class APPLY_OT_PoseDiff(bpy.types.Operator):
         
         try:
             add_pose_from_json(pose_filename, avatar_data_filename, invert)
-            action = "逆適用" if invert else "適用"
-            self.report({'INFO'}, f"ポーズデータを{action}しました: {pose_filename}")
+            action = "inverse applied" if invert else "applied"
+            self.report({'INFO'}, f"Pose data {action}: {pose_filename}")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
@@ -3402,7 +3402,7 @@ class SWAP_OT_AvatarSettings(bpy.types.Operator):
         scene.rbf_source_avatar_data_file = target_avatar_data_file
         scene.rbf_target_avatar_data_file = source_avatar_data_file
         
-        self.report({'INFO'}, "アバター設定を入れ替えました")
+        self.report({'INFO'}, "Avatar settings swapped")
         return {'FINISHED'}
 
 
@@ -3417,14 +3417,14 @@ class SET_OT_HumanoidBoneInheritScale(bpy.types.Operator):
         
         # アクティブオブジェクトがArmatureかチェック
         if not context.active_object or context.active_object.type != 'ARMATURE':
-            self.report({'ERROR'}, "Armatureオブジェクトを選択してください")
+            self.report({'ERROR'}, "Please select an Armature object")
             return {'CANCELLED'}
         
         armature_obj = context.active_object
         
         # ソースアバターデータファイルが設定されているかチェック
         if not scene.rbf_source_avatar_data_file:
-            self.report({'ERROR'}, "ソースアバターデータファイルを設定してください")
+            self.report({'ERROR'}, "Please set source avatar data file")
             return {'CANCELLED'}
         
         try:
@@ -3458,19 +3458,19 @@ class SET_OT_HumanoidBoneInheritScale(bpy.types.Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
             
             if modified_count > 0:
-                self.report({'INFO'}, f"{modified_count}個のHumanoidボーンのInherit ScaleをAverageに設定しました")
+                self.report({'INFO'}, f"Set Inherit Scale to Average for {modified_count} Humanoid bones")
             else:
-                self.report({'INFO'}, "変更すべきボーンがありませんでした")
-            
+                self.report({'INFO'}, "No bones needed modification")
+
             return {'FINISHED'}
-            
+
         except Exception as e:
             # エラー時はObjectModeに戻る
             try:
                 bpy.ops.object.mode_set(mode='OBJECT')
             except:
                 pass
-            self.report({'ERROR'}, f"エラーが発生しました: {str(e)}")
+            self.report({'ERROR'}, f"An error occurred: {str(e)}")
             return {'CANCELLED'}
 
 
@@ -3562,7 +3562,7 @@ class APPLY_OT_InverseFieldData(bpy.types.Operator):
         source_shape_key_name = scene.rbf_source_shape_key
         
         if not source_avatar_name:
-            self.report({'ERROR'}, "ソースアバター名を指定してください")
+            self.report({'ERROR'}, "Please specify source avatar name")
             return {'CANCELLED'}
         
         # ファイルパスを現在の設定に基づいて生成（逆変形）
@@ -3570,36 +3570,36 @@ class APPLY_OT_InverseFieldData(bpy.types.Operator):
         if save_shape_key_mode:
             # シェイプキー変形モードの場合
             if not source_shape_key_name:
-                self.report({'ERROR'}, "シェイプキー変形モードではシェイプキー名を指定してください")
+                self.report({'ERROR'}, "Please specify shape key name in shape key mode")
                 return {'CANCELLED'}
             field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_shape_{source_shape_key_name}_inv.npz")
-            display_name = f"逆シェイプキー変形データ"
+            display_name = "Inverse shape key deformation data"
         else:
             # 通常のアバター間変形の場合
             if not target_avatar_name:
-                self.report({'ERROR'}, "ターゲットアバター名を指定してください")
+                self.report({'ERROR'}, "Please specify target avatar name")
                 return {'CANCELLED'}
             field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_to_{target_avatar_name}_inv.npz")
-            display_name = f"逆アバター間変形データ"
-        
+            display_name = "Inverse inter-avatar deformation data"
+
         if not os.path.exists(field_data_path):
-            self.report({'ERROR'}, f"{display_name}ファイルが見つかりません: {os.path.basename(field_data_path)}")
-            print(f"逆変形データファイルが見つかりません: {field_data_path}")
+            self.report({'ERROR'}, f"{display_name} file not found: {os.path.basename(field_data_path)}")
+            print(f"Inverse deformation data file not found: {field_data_path}")
             return {'CANCELLED'}
         
         try:
             target_obj = context.active_object
             if not target_obj or target_obj.type != 'MESH':
-                self.report({'ERROR'}, "メッシュオブジェクトを選択してください")
+                self.report({'ERROR'}, "Please select a Mesh object")
                 return {'CANCELLED'}
             
             shape_key_name = scene.rbf_apply_shape_key_name if scene.rbf_apply_shape_key_name else "RBFDeform_inv"
             apply_field_data(target_obj, field_data_path, shape_key_name)
-            self.report({'INFO'}, f"{display_name}を適用しました: {os.path.basename(field_data_path)}")
+            self.report({'INFO'}, f"{display_name} applied: {os.path.basename(field_data_path)}")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
@@ -3647,7 +3647,7 @@ def export_rbf_temp_data(source_obj, source_shape_key_name, selected_only=True, 
         
         for invert in directions:
             direction_suffix = "_inv" if invert else ""
-            print(f"\n=== {'逆' if invert else '通常'}変形の一時データ準備開始 ===")
+            print(f"\n=== Starting temporary data preparation for {'inverse' if invert else 'normal'} deformation ===")
             
             # 一時データの保存パスを自動生成
             scene_folder = get_scene_folder()
@@ -3712,13 +3712,13 @@ def export_rbf_temp_data(source_obj, source_shape_key_name, selected_only=True, 
                 selected_indices = get_vertices_in_scaled_bbox(source_obj, bpy.context.scene.rbf_bbox_scale_factor)
                 
                 if len(selected_indices) < 4:
-                    print(f"警告: 制御点が非常に少ないです（{len(selected_indices)}個）。より多くの制御点を選択することをお勧めします。")
+                    print(f"Warning: Very few control points ({len(selected_indices)}). Consider selecting more control points.")
             else:
                 # すべての頂点を使用
                 selected_indices = list(range(len(source_obj.data.vertices)))
             
             # シェイプキー値0と1での重複制御点を事前に特定
-            print("シェイプキー値0と1での重複制御点を事前チェック中...")
+            print("Pre-checking for duplicate control points at shape key values 0 and 1...")
             overlapping_indices = identify_overlapping_control_points_for_shape_keys(
                 source_obj, 
                 source_shape_key_name, 
@@ -3733,7 +3733,7 @@ def export_rbf_temp_data(source_obj, source_shape_key_name, selected_only=True, 
             all_field_world_vertices = []
             
             for step in range(num_steps):
-                print(f"\n=== ステップ {step+1}/{num_steps} のデータ収集 ===")
+                print(f"\n=== Collecting data for step {step+1}/{num_steps} ===")
                 
                 # 現在のステップの値を計算
                 progress = (step + 1) / num_steps
@@ -3744,18 +3744,18 @@ def export_rbf_temp_data(source_obj, source_shape_key_name, selected_only=True, 
                     # 通常モードでは開始値から終了値へ変化
                     step_value = shape_key_start_value + (shape_key_end_value - shape_key_start_value) * progress
                 
-                print(f"シェイプキー値: {step_value}")
+                print(f"Shape key value: {step_value}")
                 
                 # 頂点グループに基づいて制御点をフィルタリング
                 filtered_indices = filter_control_points_by_vertex_groups(source_obj, selected_indices, step_value)
                 
                 if len(filtered_indices) < 4:
-                    print(f"警告: ステップ {step+1} で有効な制御点が非常に少ないです（{len(filtered_indices)}個）。")
+                    print(f"Warning: Very few valid control points at step {step+1} ({len(filtered_indices)}).")
                     if len(filtered_indices) == 0:
-                        print(f"ステップ {step+1} をスキップします：有効な制御点がありません。")
+                        print(f"Skipping step {step+1}: No valid control points.")
                         continue
                 
-                print(f"制御点数: {len(selected_indices)} → {len(filtered_indices)} (頂点グループフィルタリング後)")
+                print(f"Control points: {len(selected_indices)} -> {len(filtered_indices)} (after vertex group filtering)")
                 
                 # 変形前の状態を取得（バウンディングボックス計算用）
                 current_basis_local = np.array([evaluated_source.data.vertices[i].co.copy() for i in filtered_indices])
@@ -3768,7 +3768,7 @@ def export_rbf_temp_data(source_obj, source_shape_key_name, selected_only=True, 
                     current_basis[i] = np.array([world_basis[0], world_basis[1], world_basis[2]])
                 
                 # 現在のステップでのフィールドを生成（変形前のソースオブジェクトを使用）
-                print(f"ステップ {step+1} のDeformation Fieldを生成中...")
+                print(f"Generating Deformation Field for step {step+1}...")
                 field_vertices = create_adaptive_deformation_field(
                     target_obj=source_obj,
                     base_grid_spacing=bpy.context.scene.rbf_base_grid_spacing,
@@ -3781,7 +3781,7 @@ def export_rbf_temp_data(source_obj, source_shape_key_name, selected_only=True, 
                 )
                 
                 if field_vertices is None:
-                    print(f"ステップ {step+1} でフィールドの生成に失敗しました")
+                    print(f"Failed to generate field at step {step+1}")
                     continue
                 
                 # VectorオブジェクトをPython配列に変換（Pickle化可能にするため）
@@ -3824,7 +3824,7 @@ def export_rbf_temp_data(source_obj, source_shape_key_name, selected_only=True, 
                 # 事前に特定された重複制御点を除外
                 selected_indices_updated = filtered_indices
                 if len(overlapping_indices) > 0:
-                    print(f"事前に特定された {len(overlapping_indices)} 個の重複制御点を除外")
+                    print(f"Excluding {len(overlapping_indices)} pre-identified duplicate control points")
                     # 重複していない制御点のインデックスを取得
                     all_indices = np.arange(len(current_basis_extended))
                     valid_indices = np.setdiff1d(all_indices, overlapping_indices)
@@ -3838,7 +3838,7 @@ def export_rbf_temp_data(source_obj, source_shape_key_name, selected_only=True, 
                         
                         current_basis_extended = current_basis_extended[valid_indices]
                         current_deformed_extended = current_deformed_extended[valid_indices]
-                        print(f"重複制御点を除外しました: {len(valid_indices)}個の制御点を使用")
+                        print(f"Excluded duplicate control points: using {len(valid_indices)} control points")
                 
                 # ステップデータを保存
                 step_data = {
@@ -3850,7 +3850,7 @@ def export_rbf_temp_data(source_obj, source_shape_key_name, selected_only=True, 
                 
                 all_step_data.append(step_data)
                 
-                print(f"ステップ {step+1} のデータ収集完了")
+                print(f"Step {step+1} data collection complete")
             
             # シェイプキーの値を元に戻す
             for key_name, value in original_values.items():
@@ -3890,7 +3890,7 @@ def export_rbf_temp_data(source_obj, source_shape_key_name, selected_only=True, 
             # numpy形式で保存
             np.savez(temp_data_path, **temp_data)
             
-            print(f"一時データを保存しました: {temp_data_path}")
+            print(f"Saved temporary data: {temp_data_path}")
             results.append(temp_data_path)
         
         return results
@@ -3947,7 +3947,7 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                     item = self._queue.get_nowait()
                     if item[0] == 'LOG':
                         line = item[1]
-                        print(f"[RBF処理] {line}")
+                        print(f"[RBF Processing] {line}")
 
                         # Phase 3: フェーズ検出
                         if '距離計算進捗' in line or '距離計算を' in line:
@@ -3999,10 +3999,10 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
             if self._progress > 0:
                 phase_str = f"[{self._current_phase}] " if self._current_phase else ""
                 context.workspace.status_text_set(
-                    f"RBF処理中{dots} {phase_str}{self._progress:.1f}%"
+                    f"RBF Processing{dots} {phase_str}{self._progress:.1f}%"
                 )
             else:
-                context.workspace.status_text_set(f"RBF処理中{dots}")
+                context.workspace.status_text_set(f"RBF Processing{dots}")
 
         elif event.type == 'ESC':
             self._cancel_process(context)
@@ -4037,12 +4037,12 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
 
         # アバター名の検証
         if not source_avatar_name or not target_avatar_name:
-            self.report({'ERROR'}, "アバター名を設定してください")
+            self.report({'ERROR'}, "Please set avatar name")
             return {'CANCELLED'}
 
         # シェイプキーの値の範囲検証
         if shape_key_start_value == shape_key_end_value:
-            self.report({'ERROR'}, "シェイプキーの開始値と終了値は異なる値を設定してください")
+            self.report({'ERROR'}, "Shape key start and end values must be different")
             return {'CANCELLED'}
 
 
@@ -4078,12 +4078,12 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
 
             # 保存されたファイルの情報を生成
             file_list = ", ".join([os.path.basename(path) for path in self._temp_file_paths])
-            self.report({'INFO'}, f"一時データをエクスポートしました: {file_list}")
+            self.report({'INFO'}, f"Temporary data exported: {file_list}")
 
             base_temp_path = self._temp_file_paths[0]
 
             print(f"\n{'='*60}")
-            print(f"RBF処理開始: {os.path.basename(base_temp_path)}")
+            print(f"RBF processing started: {os.path.basename(base_temp_path)}")
             print(f"{'='*60}")
 
             # Queue 初期化
@@ -4114,12 +4114,12 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                     # パスの存在確認
                     if not os.path.exists(python_path):
                         if q:
-                            q.put(('ERROR', f"Pythonバイナリが見つかりません: {python_path}"))
+                            q.put(('ERROR', f"Python binary not found: {python_path}"))
                         return
 
                     if not os.path.exists(processor_path):
                         if q:
-                            q.put(('ERROR', f"RBFプロセッサスクリプトが見つかりません: {processor_path}"))
+                            q.put(('ERROR', f"RBF processor script not found: {processor_path}"))
                         return
 
                     # 環境変数を設定
@@ -4153,7 +4153,7 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                     cmd = [python_path, '-u', processor_path, base_temp_path,
                            '--max-workers', str(max_workers)]
 
-                    print(f"実行コマンド: {' '.join(cmd)}")
+                    print(f"Executing command: {' '.join(cmd)}")
                     print(f"max_workers: {max_workers}, OMP_NUM_THREADS: 2")
 
                     # プロセスを起動
@@ -4192,7 +4192,7 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                         q.put(('DONE', self._process.returncode))
 
                 except Exception as e:
-                    error_msg = f"RBF処理中にエラーが発生しました: {str(e)}"
+                    error_msg = f"Error during RBF processing: {str(e)}"
                     print(error_msg)
                     print(traceback.format_exc())
                     if q:
@@ -4207,14 +4207,14 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
             context.window_manager.modal_handler_add(self)
 
             # ステータスバーに表示開始
-            context.workspace.status_text_set("RBF処理を開始しています...")
+            context.workspace.status_text_set("Starting RBF processing...")
 
-            self.report({'INFO'}, "マルチプロセス処理を開始しました（バックグラウンドで実行中）")
+            self.report({'INFO'}, "Multiprocess processing started (running in background)")
 
             return {'RUNNING_MODAL'}
 
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             # Phase 3: 例外時もプログレスバーを確実に終了
@@ -4231,17 +4231,17 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
         self._cleanup(context)
 
         if success:
-            self.report({'INFO'}, "RBF処理が正常に完了しました")
-            print("RBF処理が正常に完了しました")
+            self.report({'INFO'}, "RBF processing completed successfully")
+            print("RBF processing completed successfully")
 
             # 成功ポップアップを表示
             def draw_success_popup(self, context):
-                self.layout.label(text="Deformation Field の生成が完了しました")
+                self.layout.label(text="Deformation Field generation completed")
 
-            context.window_manager.popup_menu(draw_success_popup, title="処理完了", icon='CHECKMARK')
+            context.window_manager.popup_menu(draw_success_popup, title="Complete", icon='CHECKMARK')
         else:
-            self.report({'ERROR'}, "RBF処理でエラーが発生しました")
-            print("RBF処理でエラーが発生しました")
+            self.report({'ERROR'}, "RBF processing failed")
+            print("RBF processing failed")
 
         # UIを更新
         for area in context.screen.areas:
@@ -4253,7 +4253,7 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
         self._temp_file_paths = None
         self._cleanup(context)
         self.report({'ERROR'}, error_msg)
-        print(f"RBF処理エラー: {error_msg}")
+        print(f"RBF processing error: {error_msg}")
 
         # UIを更新
         for area in context.screen.areas:
@@ -4266,7 +4266,7 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
         if self._process:
             try:
                 pid = self._process.pid
-                print(f"RBF処理をキャンセルしています (PID: {pid})...")
+                print(f"Cancelling RBF processing (PID: {pid})...")
 
                 # Phase 2: Windows では taskkill を使用して子プロセスも含めて終了
                 if sys.platform == 'win32':
@@ -4275,32 +4275,32 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                         kill_cmd = ['taskkill', '/T', '/F', '/PID', str(pid)]
                         result = subprocess.run(kill_cmd, capture_output=True, timeout=5)
                         if result.returncode == 0:
-                            print(f"taskkill で子プロセスを含めて終了しました (PID: {pid})")
+                            print(f"Terminated including child processes with taskkill (PID: {pid})")
                         else:
                             # taskkill が失敗した場合（プロセスが既に終了している等）
                             stderr_msg = result.stderr.decode('utf-8', errors='replace').strip()
-                            print(f"taskkill が returncode={result.returncode} で終了: {stderr_msg}")
-                            print("terminate() を試行...")
+                            print(f"taskkill exited with returncode={result.returncode}: {stderr_msg}")
+                            print("Trying terminate()...")
                             self._process.terminate()
                     except subprocess.TimeoutExpired:
-                        print("taskkill がタイムアウトしました。terminate() を試行...")
+                        print("taskkill timed out. Trying terminate()...")
                         self._process.terminate()
                     except Exception as e:
-                        print(f"taskkill でエラー: {e}。terminate() を試行...")
+                        print(f"Error with taskkill: {e}. Trying terminate()...")
                         self._process.terminate()
                 else:
                     # Unix 系では terminate() を使用
                     self._process.terminate()
 
-                print("RBF処理をキャンセルしました")
+                print("RBF processing cancelled")
             except Exception as e:
-                print(f"プロセス終了中にエラー: {e}")
+                print(f"Error while terminating process: {e}")
 
         # Phase 2: 一時ファイルをクリーンアップ
         self._cleanup_temp_files()
 
         self._cleanup(context)
-        self.report({'WARNING'}, "RBF処理がキャンセルされました")
+        self.report({'WARNING'}, "RBF processing was cancelled")
 
     def _cleanup_temp_files(self):
         """一時ファイルをクリーンアップ（キャンセル時のみ）"""
@@ -4309,9 +4309,9 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
                 try:
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
-                        print(f"一時ファイルを削除しました: {os.path.basename(temp_path)}")
+                        print(f"Deleted temporary file: {os.path.basename(temp_path)}")
                 except Exception as e:
-                    print(f"一時ファイル削除エラー ({os.path.basename(temp_path)}): {e}")
+                    print(f"Error deleting temporary file ({os.path.basename(temp_path)}): {e}")
             self._temp_file_paths = None
 
     def _cleanup(self, context):
@@ -4543,7 +4543,7 @@ def get_blender_python_user_site_packages(python_path=None):
                 pass
                 
     except Exception as e:
-        print(f"ユーザーサイトパッケージの取得に失敗しました: {e}")
+        print(f"Failed to get user site packages: {e}")
         
     return None
 
@@ -4773,19 +4773,19 @@ def run_rbf_processor(temp_file_path, python_path=None, processor_path=None, old
         # BlenderのPythonライブラリパスを取得
         blender_lib_paths = get_blender_python_lib_paths()
         
-        print(f"検出されたBlenderライブラリパス:")
+        print(f"Detected Blender library paths:")
         for path in blender_lib_paths:
             print(f"  - {path}")
-        
+
         # --userでインストールされたパッケージのパスを取得
         user_site_packages = get_blender_python_user_site_packages(python_path)
         if user_site_packages:
-            print(f"検出されたユーザーサイトパッケージパス: {user_site_packages}")
+            print(f"Detected user site packages path: {user_site_packages}")
         else:
-            print("ユーザーサイトパッケージパスが見つかりませんでした")
+            print("User site packages path not found")
 
         blender_deps_path = os.path.join(os.path.dirname(__file__), 'deps')
-        print(f"Blenderのdepsパス: {blender_deps_path}")
+        print(f"Blender deps path: {blender_deps_path}")
         
         # 方法1: 環境変数を使用してライブラリパスを設定
         env = os.environ.copy()
@@ -4811,7 +4811,7 @@ def run_rbf_processor(temp_file_path, python_path=None, processor_path=None, old
         # Pythonの標準出力バッファリングを無効にする
         env['PYTHONUNBUFFERED'] = '1'
         
-        print(f"設定されたPYTHONPATH: {env['PYTHONPATH']}")
+        print(f"Configured PYTHONPATH: {env['PYTHONPATH']}")
         
         # コマンドを構築（-uフラグでバッファリングを無効化）
         cmd = [python_path, '-u', processor_path, temp_file_path]
@@ -4829,12 +4829,12 @@ def run_rbf_processor(temp_file_path, python_path=None, processor_path=None, old
         cmd.append('--max-workers')
         cmd.append(str(max_workers))
 
-        print(f"設定された環境変数: {env}")
-        
-        print(f"実行コマンド: {' '.join(cmd)}")
-        
+        print(f"Configured environment variables: {env}")
+
+        print(f"Executing command: {' '.join(cmd)}")
+
         # プロセスを実行（リアルタイム出力）
-        print("RBF処理を開始します...")
+        print("Starting RBF processing...")
         
         try:
             process = subprocess.Popen(
@@ -4864,7 +4864,7 @@ def run_rbf_processor(temp_file_path, python_path=None, processor_path=None, old
                         break
                     if line:
                         line = line.rstrip('\n\r')
-                        print(f"[RBF処理] {line}")
+                        print(f"[RBF Processing] {line}")
                         output_lines.append(line)
             else:
                 # Unix系の場合はselectを使用
@@ -4874,7 +4874,7 @@ def run_rbf_processor(temp_file_path, python_path=None, processor_path=None, old
                         remaining = process.stdout.read()
                         if remaining:
                             for line in remaining.splitlines():
-                                print(f"[RBF処理] {line}")
+                                print(f"[RBF Processing] {line}")
                                 output_lines.append(line)
                         break
                     
@@ -4884,7 +4884,7 @@ def run_rbf_processor(temp_file_path, python_path=None, processor_path=None, old
                         line = process.stdout.readline()
                         if line:
                             line = line.rstrip('\n\r')
-                            print(f"[RBF処理] {line}")
+                            print(f"[RBF Processing] {line}")
                             output_lines.append(line)
             
             # プロセスの完了を待つ
@@ -4893,12 +4893,12 @@ def run_rbf_processor(temp_file_path, python_path=None, processor_path=None, old
             output = '\n'.join(output_lines)
             
             if success:
-                print("RBF処理が正常に完了しました")
+                print("RBF processing completed successfully")
             else:
-                print(f"RBF処理でエラーが発生しました (return code: {process.returncode})")
-                
+                print(f"RBF processing failed (return code: {process.returncode})")
+
         except Exception as e:
-            print(f"プロセス実行中にエラーが発生しました: {e}")
+            print(f"Error during process execution: {e}")
             success = False
             output = ""
         
@@ -4921,47 +4921,47 @@ class DEBUG_OT_ShowPythonPaths(bpy.types.Operator):
             # BlenderのPythonバイナリパス
             python_path = get_blender_python_path()
             print(f"\n{'='*60}")
-            print(f"PYTHON パス情報")
+            print(f"PYTHON Path Information")
             print(f"{'='*60}")
-            print(f"Pythonバイナリパス: {python_path}")
-            print(f"存在確認: {os.path.exists(python_path)}")
-            
+            print(f"Python binary path: {python_path}")
+            print(f"Exists: {os.path.exists(python_path)}")
+
             # ユーザーサイトパッケージパス
             user_site_packages = get_blender_python_user_site_packages(python_path)
-            print(f"\nユーザーサイトパッケージパス:")
+            print(f"\nUser site packages path:")
             if user_site_packages:
                 print(f"  {user_site_packages}")
-                print(f"  存在: {'○' if os.path.exists(user_site_packages) else '×'}")
+                print(f"  Exists: {'Yes' if os.path.exists(user_site_packages) else 'No'}")
             else:
-                print("  見つかりませんでした")
-            
+                print("  Not found")
+
             # BlenderのPythonライブラリパス
             lib_paths = get_blender_python_lib_paths()
-            print(f"\nBlenderライブラリパス:")
+            print(f"\nBlender library paths:")
             for i, path in enumerate(lib_paths, 1):
                 print(f"  {i}. {path}")
-                print(f"     存在: {'○' if os.path.exists(path) else '×'}")
-                
+                print(f"     Exists: {'Yes' if os.path.exists(path) else 'No'}")
+
             # RBFプロセッサスクリプトパス
             processor_path = get_rbf_processor_script_path()
-            print(f"\nRBFプロセッサスクリプトパス: {processor_path}")
-            print(f"存在確認: {os.path.exists(processor_path)}")
-            
+            print(f"\nRBF processor script path: {processor_path}")
+            print(f"Exists: {os.path.exists(processor_path)}")
+
             # 現在のPYTHONPATH
-            current_pythonpath = os.environ.get('PYTHONPATH', '未設定')
-            print(f"\n現在のPYTHONPATH: {current_pythonpath}")
-            
+            current_pythonpath = os.environ.get('PYTHONPATH', 'Not set')
+            print(f"\nCurrent PYTHONPATH: {current_pythonpath}")
+
             # Blender内でのscipysチェック
             try:
                 import scipy
-                print(f"\nBlender内でのscipy: 利用可能 (バージョン: {scipy.__version__})")
-                print(f"scipyパス: {scipy.__file__}")
+                print(f"\nSciPy in Blender: Available (version: {scipy.__version__})")
+                print(f"SciPy path: {scipy.__file__}")
             except ImportError as e:
-                print(f"\nBlender内でのscipy: 利用不可 ({e})")
+                print(f"\nSciPy in Blender: Not available ({e})")
             
             print(f"{'='*60}")
             
-            self.report({'INFO'}, "デバッグ情報をコンソールに出力しました")
+            self.report({'INFO'}, "Debug info printed to console")
             return {'FINISHED'}
         
         except Exception as e:
@@ -4993,7 +4993,7 @@ class CREATE_OT_FieldVisualization(bpy.types.Operator):
         object_name = scene.rbf_field_object_name.strip()
         
         if not source_avatar_name:
-            self.report({'ERROR'}, "ソースアバター名を指定してください")
+            self.report({'ERROR'}, "Please specify source avatar name")
             return {'CANCELLED'}
         
         if not object_name:
@@ -5006,21 +5006,21 @@ class CREATE_OT_FieldVisualization(bpy.types.Operator):
         if save_shape_key_mode:
             # シェイプキー変形モードの場合
             if not source_shape_key_name:
-                self.report({'ERROR'}, "シェイプキー変形モードではシェイプキー名を指定してください")
+                self.report({'ERROR'}, "Please specify shape key name in shape key mode")
                 return {'CANCELLED'}
             field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_shape_{source_shape_key_name}{inverse_suffix}.npz")
-            display_name = f"シェイプキー変形データ"
+            display_name = "Shape key deformation data"
         else:
             # 通常のアバター間変形の場合
             if not target_avatar_name:
-                self.report({'ERROR'}, "ターゲットアバター名を指定してください")
+                self.report({'ERROR'}, "Please specify target avatar name")
                 return {'CANCELLED'}
             field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_to_{target_avatar_name}{inverse_suffix}.npz")
-            display_name = f"アバター間変形データ"
-        
+            display_name = "Inter-avatar deformation data"
+
         if not os.path.exists(field_data_path):
-            self.report({'ERROR'}, f"{display_name}ファイルが見つかりません: {os.path.basename(field_data_path)}")
-            print(f"変形データファイルが見つかりません: {field_data_path}")
+            self.report({'ERROR'}, f"{display_name} file not found: {os.path.basename(field_data_path)}")
+            print(f"Deformation data file not found: {field_data_path}")
             return {'CANCELLED'}
         
         try:
@@ -5031,12 +5031,12 @@ class CREATE_OT_FieldVisualization(bpy.types.Operator):
                 object_name=object_name
             )
             
-            direction_text = "逆変換" if use_inverse else "通常"
-            self.report({'INFO'}, f"フィールドオブジェクト '{field_obj.name}' を作成しました（{direction_text}、ステップ{field_step}）")
+            direction_text = "inverse" if use_inverse else "normal"
+            self.report({'INFO'}, f"Field object '{field_obj.name}' created ({direction_text}, step {field_step})")
             return {'FINISHED'}
-        
+
         except Exception as e:
-            error_msg = f"エラーが発生しました: {str(e)}"
+            error_msg = f"An error occurred: {str(e)}"
             stack_trace = traceback.format_exc()
             print(f"{error_msg}\n{stack_trace}")
             self.report({'ERROR'}, error_msg)
@@ -5173,32 +5173,32 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         deps_old_path = os.path.join(addon_dir, 'deps_old')
 
         print(f"\n{'='*60}")
-        print(f"NumPy・SciPy マルチスレッド対応再インストール開始")
+        print(f"NumPy/SciPy Multi-threaded Reinstallation Starting")
         print(f"{'='*60}")
-        print(f"NumPy バージョン: {numpy_version}")
+        print(f"NumPy version: {numpy_version}")
         if scipy_version:
-            print(f"SciPy バージョン: {scipy_version}")
+            print(f"SciPy version: {scipy_version}")
         else:
-            print("SciPy: インストールされていません（新規インストールします）")
+            print("SciPy: Not installed (will install new)")
 
         # 一時ディレクトリをクリーンアップ（前回の失敗時のゴミを削除）
         # 注意: Windows ではファイルシステムの状態が遅延することがあるため
         # os.path.exists() が False でも実際には存在する場合がある
         # そのため、存在チェックをせずに常に削除を試みる
         for tmp_path in [deps_new_path, deps_old_path]:
-            print(f"一時パスをクリーンアップ中: {tmp_path}")
+            print(f"Cleaning up temporary path: {tmp_path}")
             try:
                 # まずファイルとして削除を試みる
                 try:
                     os.remove(tmp_path)
-                    print(f"  ファイルを削除しました")
+                    print(f"  Deleted file")
                     continue
                 except IsADirectoryError:
                     # ディレクトリの場合は rmtree へ
                     pass
                 except FileNotFoundError:
                     # 存在しない場合はスキップ
-                    print(f"  存在しません（スキップ）")
+                    print(f"  Does not exist (skipping)")
                     continue
                 except PermissionError:
                     # ディレクトリの可能性があるので rmtree へ
@@ -5207,9 +5207,9 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
                 # ディレクトリとして削除を試みる
                 try:
                     shutil.rmtree(tmp_path, onerror=_rmtree_onerror)
-                    print(f"  ディレクトリを削除しました")
+                    print(f"  Deleted directory")
                 except FileNotFoundError:
-                    print(f"  存在しません（スキップ）")
+                    print(f"  Does not exist (skipping)")
                 except PermissionError as e:
                     err_msg = f"ファイルがロックされています。Blenderを再起動してから再実行してください: {e}"
                     print(f"  {err_msg}")
@@ -5227,7 +5227,7 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         # 一時ディレクトリを作成
         # 注意: Microsoft Store版Blenderではos.makedirs()が失敗するため、
         # cmd /c mkdir を優先的に使用する
-        print(f"一時ディレクトリを作成中: {deps_new_path}")
+        print(f"Creating temporary directory: {deps_new_path}")
 
         def create_directory_windows(path: str) -> tuple:
             """
@@ -5250,22 +5250,22 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
                 if os.path.isdir(path):
                     return True, "cmd (already exists)"
             except Exception as e:
-                print(f"  cmd /c mkdir 例外: {e}")
+                print(f"  cmd /c mkdir exception: {e}")
 
             # 方法2: os.makedirs（通常環境用フォールバック）
             try:
                 os.makedirs(path, exist_ok=True)
                 return True, "os.makedirs"
             except OSError as e:
-                print(f"  os.makedirs 失敗: {e}")
+                print(f"  os.makedirs failed: {e}")
 
             return False, ""
 
         success, method = create_directory_windows(deps_new_path)
         if success:
-            print(f"一時ディレクトリを作成しました（{method}）")
+            print(f"Created temporary directory ({method})")
         else:
-            return False, "", f"一時ディレクトリの作成に失敗: {deps_new_path}"
+            return False, "", f"Failed to create temporary directory: {deps_new_path}"
 
         # pip download + 手動展開方式
         # Microsoft Store版Blenderでは pip install --target が
@@ -5276,15 +5276,15 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         wheels_path = os.path.join(deps_new_path, '_wheels')
         success, method = create_directory_windows(wheels_path)
         if not success:
-            return False, "", f"wheelダウンロード用ディレクトリの作成に失敗: {wheels_path}"
-        print(f"wheelダウンロード用ディレクトリを作成しました: {wheels_path}")
+            return False, "", f"Failed to create wheel download directory: {wheels_path}"
+        print(f"Created wheel download directory: {wheels_path}")
 
         # Step 1: pip download で wheel ファイルをダウンロード
         cmd = [python_path, "-m", "pip", "download",
                "--no-cache-dir",
                "--only-binary=:all:",  # ソースビルドを避ける
                "--dest", wheels_path] + packages
-        print(f"実行コマンド: {' '.join(cmd)}")
+        print(f"Executing command: {' '.join(cmd)}")
 
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
@@ -5312,14 +5312,14 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
 
         result = Result()
 
-        print(f"実行結果 (return code: {result.returncode}):")
-        print(f"出力:\n{result.stdout}")
+        print(f"Execution result (return code: {result.returncode}):")
+        print(f"Output:\n{result.stdout}")
 
         if result.stderr:
-            print(f"エラー出力:\n{result.stderr}")
+            print(f"Error output:\n{result.stderr}")
 
         if result.returncode != 0:
-            print("pip download が失敗しました。既存の deps は保持されます。")
+            print("pip download failed. Existing deps will be kept.")
             safe_rmtree(deps_new_path)
             return False, result.stdout, result.stderr
 
@@ -5328,20 +5328,20 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         # Microsoft Store版Blenderで WinError 183 が発生する。
         # そのため、ファイルを1つずつ展開し、ディレクトリ作成には
         # cmd /c mkdir を使用する。
-        print("wheelファイルを展開中...")
+        print("Extracting wheel files...")
         wheel_files = [f for f in os.listdir(wheels_path) if f.endswith('.whl')]
 
         if not wheel_files:
-            print("エラー: wheelファイルが見つかりません")
+            print("Error: No wheel files found")
             safe_rmtree(deps_new_path)
-            return False, result.stdout, "wheelファイルが見つかりません"
+            return False, result.stdout, "No wheel files found"
 
         # 作成済みディレクトリを追跡（重複作成を避ける）
         created_dirs = set()
 
         for wheel_file in wheel_files:
             wheel_path = os.path.join(wheels_path, wheel_file)
-            print(f"  展開中: {wheel_file}")
+            print(f"  Extracting: {wheel_file}")
             try:
                 with zipfile.ZipFile(wheel_path, 'r') as zip_ref:
                     for member in zip_ref.namelist():
@@ -5367,33 +5367,33 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
                                 target.write(source.read())
 
             except Exception as e:
-                print(f"  展開エラー: {e}")
+                print(f"  Extraction error: {e}")
                 import traceback
                 traceback.print_exc()
                 safe_rmtree(deps_new_path)
-                return False, result.stdout, f"wheel展開エラー: {e}"
+                return False, result.stdout, f"Wheel extraction error: {e}"
 
         # Step 3: wheels ディレクトリを削除
-        print("wheelファイルをクリーンアップ中...")
+        print("Cleaning up wheel files...")
         safe_rmtree(wheels_path)
 
         # pip 成功: ディレクトリを置き換え
-        print("インストール成功。ディレクトリを置き換え中...")
+        print("Installation successful. Replacing directory...")
 
         # 既存の deps があれば deps_old にリネーム
         if os.path.exists(deps_path):
-            print(f"既存の deps を deps_old に移動中...")
+            print(f"Moving existing deps to deps_old...")
             success, err_type, err_msg = safe_rename(deps_path, deps_old_path)
             if not success:
-                print(f"deps のリネームに失敗: {err_msg}")
+                print(f"Failed to rename deps: {err_msg}")
                 # 失敗しても新しい deps_new は残す（手動復旧用）
                 return False, result.stdout, err_msg
 
         # deps_new を deps にリネーム
-        print(f"deps_new を deps に移動中...")
+        print(f"Moving deps_new to deps...")
         success, err_type, err_msg = safe_rename(deps_new_path, deps_path)
         if not success:
-            print(f"deps_new のリネームに失敗: {err_msg}")
+            print(f"Failed to rename deps_new: {err_msg}")
             # deps_old を deps に戻す
             if os.path.exists(deps_old_path):
                 safe_rename(deps_old_path, deps_path)
@@ -5401,16 +5401,16 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
 
         # deps_old を削除（失敗しても警告のみ）
         if os.path.exists(deps_old_path):
-            print(f"古い deps_old を削除中...")
+            print(f"Deleting old deps_old...")
             success, _, err_msg = safe_rmtree(deps_old_path)
             if not success:
-                print(f"警告: deps_old の削除に失敗しました（手動で削除してください）: {err_msg}")
+                print(f"Warning: Failed to delete deps_old (please delete manually): {err_msg}")
 
-        print("ディレクトリの置き換え完了")
+        print("Directory replacement complete")
         return True, result.stdout, result.stderr
 
     except Exception as e:
-        error_msg = f"NumPy・SciPy再インストール中にエラーが発生しました: {str(e)}"
+        error_msg = f"Error occurred during NumPy/SciPy reinstallation: {str(e)}"
         print(error_msg)
         import traceback
         traceback.print_exc()
@@ -5436,7 +5436,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
             # ステータスバーのアニメーション更新
             self._dot_count = (self._dot_count + 1) % 4
             dots = "." * (self._dot_count + 1)
-            context.workspace.status_text_set(f"NumPy・SciPy インストール中{dots}")
+            context.workspace.status_text_set(f"Installing NumPy/SciPy{dots}")
 
             # スレッドの完了をチェック
             if self._thread is not None and not self._thread.is_alive():
@@ -5455,35 +5455,35 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
                     if self._scipy_version:
                         packages_info += f", SciPy {self._scipy_version}"
                     else:
-                        packages_info += ", SciPy (新規インストール)"
+                        packages_info += ", SciPy (new installation)"
 
-                    self.report({'WARNING'}, f"{packages_info} を再インストールしました。Blenderを再起動してください")
-                    print(f"NumPy・SciPy再インストール成功。Blenderを再起動してください。")
+                    self.report({'WARNING'}, f"{packages_info} reinstalled. Please restart Blender")
+                    print(f"NumPy/SciPy reinstall succeeded. Please restart Blender.")
 
                     # 成功ポップアップを表示
                     def draw_success_popup(self, context):
-                        self.layout.label(text="NumPy・SciPy のインストールが完了しました")
+                        self.layout.label(text="NumPy/SciPy installation complete")
                         self.layout.label(text="")
-                        self.layout.label(text="Blender を再起動してください", icon='ERROR')
+                        self.layout.label(text="Please restart Blender", icon='ERROR')
 
-                    context.window_manager.popup_menu(draw_success_popup, title="インストール完了", icon='CHECKMARK')
+                    context.window_manager.popup_menu(draw_success_popup, title="Installation Complete", icon='CHECKMARK')
                 else:
                     if error:
                         self.report({'ERROR'}, error)
                     else:
-                        self.report({'ERROR'}, "NumPy・SciPy再インストールに失敗しました")
+                        self.report({'ERROR'}, "NumPy/SciPy reinstallation failed")
 
                     # エラーポップアップを表示
                     def draw_error_popup(self, context):
-                        self.layout.label(text="インストールに失敗しました")
+                        self.layout.label(text="Installation failed")
                         self.layout.label(text="")
                         if error:
                             # エラーメッセージを短く表示
                             short_error = error[:80] + "..." if len(error) > 80 else error
                             self.layout.label(text=short_error)
-                        self.layout.label(text="詳細はコンソールを確認してください", icon='INFO')
+                        self.layout.label(text="See console for details", icon='INFO')
 
-                    context.window_manager.popup_menu(draw_error_popup, title="インストールエラー", icon='ERROR')
+                    context.window_manager.popup_menu(draw_error_popup, title="Installation Error", icon='ERROR')
 
                 # UIを更新
                 for area in context.screen.areas:
@@ -5501,7 +5501,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
         self._scipy_version = get_scipy_version()
 
         if not self._numpy_version:
-            self.report({'ERROR'}, "numpy が見つかりません")
+            self.report({'ERROR'}, "numpy not found")
             return {'CANCELLED'}
 
         # bpy依存の値をメインスレッドで事前取得（スレッド安全性のため）
@@ -5510,7 +5510,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
         scipy_version = self._scipy_version
 
         if not python_path:
-            self.report({'ERROR'}, "Pythonパスが見つかりません")
+            self.report({'ERROR'}, "Python path not found")
             return {'CANCELLED'}
 
         # インストールを別スレッドで実行（純Pythonデータのみ渡す）
@@ -5531,9 +5531,9 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
 
         # ステータスバーに表示開始
         self._dot_count = 0
-        context.workspace.status_text_set("NumPy・SciPy インストール中.")
+        context.workspace.status_text_set("Installing NumPy/SciPy.")
 
-        self.report({'INFO'}, "インストール中... (バックグラウンドで実行中)")
+        self.report({'INFO'}, "Installing... (running in background)")
 
         return {'RUNNING_MODAL'}
 
@@ -5545,7 +5545,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
         if numpy_version:
             return context.window_manager.invoke_confirm(self, event)
         else:
-            self.report({'ERROR'}, "numpy が見つかりません")
+            self.report({'ERROR'}, "numpy not found")
             return {'CANCELLED'}
 
     def cancel(self, context):
@@ -5641,17 +5641,17 @@ print("\\nTest completed")
             # テストスクリプトを実行
             cmd = [python_path, test_script_path]
             print(f"\n{'='*60}")
-            print(f"外部Pythonテスト実行")
+            print(f"External Python Test Execution")
             print(f"{'='*60}")
-            print(f"実行コマンド: {' '.join(cmd)}")
+            print(f"Executing command: {' '.join(cmd)}")
 
             returncode, stdout, stderr = run_subprocess_safe(cmd, env=env, cwd=scene_folder)
 
-            print(f"実行結果 (return code: {returncode}):")
-            print(f"出力:\n{stdout}")
+            print(f"Execution result (return code: {returncode}):")
+            print(f"Output:\n{stdout}")
 
             if stderr:
-                print(f"エラー出力:\n{stderr}")
+                print(f"Error output:\n{stderr}")
             
             # テストスクリプトを削除
             try:
@@ -5660,14 +5660,14 @@ print("\\nTest completed")
                 pass
             
             if returncode == 0:
-                self.report({'INFO'}, "外部Pythonテストが成功しました")
+                self.report({'INFO'}, "External Python test succeeded")
             else:
-                self.report({'WARNING'}, "外部Pythonテストで問題が検出されました")
+                self.report({'WARNING'}, "External Python test detected issues")
             
             return {'FINISHED'}
         
         except Exception as e:
-            error_msg = f"外部Pythonテストに失敗しました: {str(e)}"
+            error_msg = f"External Python test failed: {str(e)}"
             print(error_msg)
             self.report({'ERROR'}, error_msg)
             return {'CANCELLED'}
