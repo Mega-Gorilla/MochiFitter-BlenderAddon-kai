@@ -52,6 +52,15 @@ MochiFitter-BlenderAddon/deps_new/
 MochiFitter-BlenderAddon/deps_old/
 
 # -------------------------------------------
+# Bundled Dependencies (distributed with addon)
+# -------------------------------------------
+# psutil is bundled for memory monitoring (BSD-3-Clause license)
+!MochiFitter-BlenderAddon/deps/psutil/
+!MochiFitter-BlenderAddon/deps/psutil/**
+!MochiFitter-BlenderAddon/deps/psutil-*.dist-info/
+!MochiFitter-BlenderAddon/deps/psutil-*.dist-info/**
+
+# -------------------------------------------
 # IDE / Editor
 # -------------------------------------------
 .vscode/
