@@ -2831,7 +2831,7 @@ class RBF_PT_DeformationPanel(bpy.types.Panel):
         
         row = col.row()
         row.scale_y = 1.2
-        row.operator("rbf.reinstall_numpy_scipy_multithreaded", text="NumPy・SciPy マルチスレッド版 再インストール", icon='FILE_REFRESH')
+        row.operator("rbf.reinstall_numpy_scipy_multithreaded", text="NumPy・SciPy・psutil 再インストール", icon='FILE_REFRESH')
         
         # 区切り線
         layout.separator()
@@ -5166,6 +5166,8 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         else:
             # scipyがインストールされていない場合は最新版をインストール
             packages.append("scipy")
+        # psutilも一緒にインストール（メモリ監視用）
+        packages.append("psutil")
 
         addon_dir = os.path.dirname(__file__)
         deps_path = os.path.join(addon_dir, 'deps')
@@ -5173,13 +5175,14 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         deps_old_path = os.path.join(addon_dir, 'deps_old')
 
         print(f"\n{'='*60}")
-        print(f"NumPy/SciPy Multi-threaded Reinstallation Starting")
+        print(f"NumPy/SciPy/psutil Reinstallation Starting")
         print(f"{'='*60}")
         print(f"NumPy version: {numpy_version}")
         if scipy_version:
             print(f"SciPy version: {scipy_version}")
         else:
             print("SciPy: Not installed (will install new)")
+        print("psutil: Latest version (for memory monitoring)")
 
         # 一時ディレクトリをクリーンアップ（前回の失敗時のゴミを削除）
         # 注意: Windows ではファイルシステムの状態が遅延することがあるため
@@ -5420,8 +5423,8 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
 # numpy・scipy再インストールオペレーター（Modal版 - UIフリーズ回避）
 class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
     bl_idname = "rbf.reinstall_numpy_scipy_multithreaded"
-    bl_label = "Reinstall NumPy & SciPy (Multithreaded)"
-    bl_description = "numpyとscipyをマルチスレッド対応版で強制再インストール"
+    bl_label = "Reinstall NumPy & SciPy & psutil"
+    bl_description = "numpy, scipy, psutilを再インストール（マルチスレッド対応版）"
 
     # インストールスレッドの状態を保持
     _timer = None
