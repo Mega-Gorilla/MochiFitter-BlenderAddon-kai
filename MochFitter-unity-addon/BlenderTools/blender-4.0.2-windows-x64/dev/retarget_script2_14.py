@@ -698,6 +698,21 @@ import time
 from collections import deque, defaultdict
 import gc
 
+# =============================================================================
+# Constants
+# =============================================================================
+
+# Thresholds
+LOOSE_VERTEX_THRESHOLD = 1000       # 分離頂点の警告閾値
+MIN_WEIGHT_THRESHOLD = 0.0005       # 最小ウェイト閾値
+POSITION_EPSILON = 0.0001           # 位置比較の許容誤差 (0.1mm)
+EXTENT_EPSILON = 0.0003             # 範囲比較の許容誤差
+BLEND_VALUE_EPSILON = 0.00001       # BlendShape値の許容誤差
+
+# =============================================================================
+# Global State
+# =============================================================================
+
 # グローバルキャッシュ辞書を追加
 _mesh_cache = {}
 
@@ -777,6 +792,25 @@ def clear_all_caches():
         print(f"[Memory] Cleared caches: {', '.join(cache_stats)}")
     else:
         print("[Memory] No caches to clear")
+
+
+def safe_remove_object(obj_name: str) -> bool:
+    """
+    オブジェクトが存在する場合のみ削除する
+
+    Parameters:
+        obj_name: 削除するオブジェクト名
+
+    Returns:
+        bool: 削除成功時True、オブジェクトが存在しない場合False
+    """
+    if obj_name in bpy.data.objects:
+        bpy.data.objects.remove(bpy.data.objects[obj_name], do_unlink=True)
+        print(f"Removed object: {obj_name}")
+        return True
+    else:
+        print(f"Object not found (skipped): {obj_name}")
+        return False
 
 
 def get_shallowest_bone(armature: bpy.types.Object, avatar_data: dict = None) -> str:
@@ -1978,8 +2012,8 @@ def parse_args():
         try:
             x, y, z = map(float, args.hips_position.split(','))
             args.hips_position = Vector((x, y, z))
-        except:
-            print("Error: Invalid hips position format. Use x,y,z")
+        except ValueError as e:
+            print(f"Error: Invalid hips position format. Use x,y,z: {e}")
             sys.exit(1)
             
     return args
@@ -3199,9 +3233,9 @@ def triangulate_mesh(obj: bpy.types.Object) -> None:
         # エラーが発生した場合もオブジェクトモードに戻る
         try:
             bpy.ops.object.mode_set(mode='OBJECT')
-        except:
-            pass
-    
+        except Exception:
+            pass  # モード変更失敗は無視可能
+
     finally:
         # 元のアクティブオブジェクトを復元
         if original_active:
@@ -4798,25 +4832,28 @@ def create_hinge_bone_group(obj: bpy.types.Object, armature: bpy.types.Object, a
     original_non_humanoid_groups = all_deform_groups - bone_groups
 
     cloth_bm = get_evaluated_mesh(obj)
-    cloth_bm.verts.ensure_lookup_table()
-    cloth_bm.faces.ensure_lookup_table()
-    vertex_coords = np.array([v.co for v in cloth_bm.verts])
-    kdtree = cKDTree(vertex_coords)
+    try:
+        cloth_bm.verts.ensure_lookup_table()
+        cloth_bm.faces.ensure_lookup_table()
+        vertex_coords = np.array([v.co for v in cloth_bm.verts])
+        kdtree = cKDTree(vertex_coords)
 
-    hinge_bone_group = obj.vertex_groups.new(name="HingeBone")
-    for bone_name in original_non_humanoid_groups:
-        bone = armature.pose.bones.get(bone_name)
-        if bone.parent and bone.parent.name in bone_groups:
-            group_index = obj.vertex_groups.find(bone_name)
-            if group_index != -1:
-                bone_head = armature.matrix_world @ bone.head
-                neighbor_indices = kdtree.query_ball_point(bone_head, 0.01)
-                for index in neighbor_indices:
-                    for g in obj.data.vertices[index].groups:
-                        if g.group == group_index:
-                            weight = g.weight
-                            hinge_bone_group.add([index], weight, 'REPLACE')
-                            break
+        hinge_bone_group = obj.vertex_groups.new(name="HingeBone")
+        for bone_name in original_non_humanoid_groups:
+            bone = armature.pose.bones.get(bone_name)
+            if bone.parent and bone.parent.name in bone_groups:
+                group_index = obj.vertex_groups.find(bone_name)
+                if group_index != -1:
+                    bone_head = armature.matrix_world @ bone.head
+                    neighbor_indices = kdtree.query_ball_point(bone_head, 0.01)
+                    for index in neighbor_indices:
+                        for g in obj.data.vertices[index].groups:
+                            if g.group == group_index:
+                                weight = g.weight
+                                hinge_bone_group.add([index], weight, 'REPLACE')
+                                break
+    finally:
+        cloth_bm.free()
 
 
 def get_humanoid_and_auxiliary_bones(avatar_data: dict) -> set:
@@ -6498,7 +6535,7 @@ def inverse_bone_deform_all_vertices(armature_obj, mesh_obj):
         # 合成行列の逆行列を計算
         try:
             inverse_matrix = combined_matrix.inverted()
-        except:
+        except Exception:
             # 逆行列が計算できない場合は単位行列を使用
             inverse_matrix = Matrix.Identity(4)
             print(f"警告: 頂点 {vertex_index} の逆行列を計算できませんでした")
@@ -11754,6 +11791,11 @@ def transfer_weights_from_nearest_vertex(base_mesh, target_obj, vertex_group_nam
         if original_mode.startswith('EDIT'):
             bpy.ops.object.mode_set(mode='EDIT')
 
+    # BMesh オブジェクトを解放
+    body_bm.free()
+    cloth_bm.free()
+
+
 def transfer_weights_x_projection(template_obj, target_obj, source_group_name, target_group_name):
     """
     template_objのsource_group_name頂点グループのウェイトをtarget_objのtarget_group_nameグループへX軸投影で転写する
@@ -11924,6 +11966,11 @@ def transfer_weights_x_projection(template_obj, target_obj, source_group_name, t
     print(f"  ウェイト計算: {weight_calc_time:.2f}秒")
     print(f"  レイキャストヒット数: {hit_count} / {len(target_bm.verts) * 2} (2方向)")
     print(f"  ウェイト>0の頂点数: {non_zero_weight_count} / {len(target_bm.verts)}")
+
+    # BMesh オブジェクトを解放
+    template_bm.free()
+    target_bm.free()
+
 
 def barycentric_coords_from_point(p, a, b, c):
     """
@@ -14170,39 +14217,6 @@ def custom_max_vertex_group(obj, group_name, vert_neighbors, repeat=3, weight_fa
         if weight > 1.0:
             weight = 1.0
         group.add([vert_idx], weight, 'REPLACE')
-
-# ウェイトパターンの類似性を計算する関数
-def calculate_weight_pattern_similarity(weights1, weights2):
-    """
-    2つのウェイトパターン間の類似性を計算する
-    
-    Parameters:
-        weights1: 1つ目のウェイトパターン {group_name: weight}
-        weights2: 2つ目のウェイトパターン {group_name: weight}
-        
-    Returns:
-        float: 類似度（0.0〜1.0、1.0が完全一致）
-    """
-    # 両方のパターンに存在するグループを取得
-    all_groups = set(weights1.keys()) | set(weights2.keys())
-    
-    if not all_groups:
-        return 0.0
-    
-    # 各グループのウェイト差の合計を計算
-    total_diff = 0.0
-    for group in all_groups:
-        w1 = weights1.get(group, 0.0)
-        w2 = weights2.get(group, 0.0)
-        total_diff += abs(w1 - w2)
-    
-    # 正規化（グループ数で割る）
-    normalized_diff = total_diff / len(all_groups)
-    
-    # 類似度に変換（差が小さいほど類似度が高い）
-    similarity = 1.0 - min(normalized_diff, 1.0)
-    
-    return similarity
 
 def calculate_component_size(coords):
     """
@@ -19761,8 +19775,8 @@ def export_armature_bone_data_to_json(armature_obj: bpy.types.Object, output_pat
         if original_mode != 'POSE':
             try:
                 bpy.ops.object.mode_set(mode='OBJECT')
-            except:
-                pass
+            except Exception:
+                pass  # モード変更失敗は無視可能
 
 
 
@@ -20217,8 +20231,8 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
             # 独立頂点（エッジも面も構成しない頂点）をカウント
             loose_verts = [v for v in bm.verts if len(v.link_edges) == 0]
             
-            # 1000個以上の場合は削除
-            if len(loose_verts) >= 1000:
+            # LOOSE_VERTEX_THRESHOLD 個以上の場合は削除
+            if len(loose_verts) >= LOOSE_VERTEX_THRESHOLD:
                 print(f"Removing {len(loose_verts)} loose vertices from {mesh_obj.name}")
                 for v in loose_verts:
                     bm.verts.remove(v)
@@ -20341,10 +20355,15 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
             if surface_group_name:
                 for obj in clothing_meshes:
                     transfer_weights_from_nearest_vertex(template_obj, obj, surface_group_name)
-            bpy.data.objects.remove(bpy.data.objects["Body.Template"], do_unlink=True)
-            bpy.data.objects.remove(bpy.data.objects["Body.Template.Eyes"], do_unlink=True)
-            bpy.data.objects.remove(bpy.data.objects["Body.Template.Head"], do_unlink=True)
-            bpy.data.objects.remove(bpy.data.objects["Armature.Template"], do_unlink=True)
+            # Template オブジェクトを安全に削除
+            template_objects_to_remove = [
+                "Body.Template",
+                "Body.Template.Eyes",
+                "Body.Template.Head",
+                "Armature.Template"
+            ]
+            for obj_name in template_objects_to_remove:
+                safe_remove_object(obj_name)
             print("Templateからの変換 股下の頂点グループ作成完了")
             bpy.context.view_layer.objects.active = current_active_object
         
@@ -20403,7 +20422,7 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
             for vert in obj.data.vertices:
                 groups_to_remove = []
                 for g in vert.groups:
-                    if g.weight < 0.0005:
+                    if g.weight < MIN_WEIGHT_THRESHOLD:
                         groups_to_remove.append(g.group)
                 
                 # 微小なウェイトを持つグループからその頂点を削除
@@ -20961,8 +20980,8 @@ def main():
                     error_output = args.output.rsplit('.', 1)[0] + f'_error_{pair_index + 1:03d}.blend'
                     bpy.ops.wm.save_as_mainfile(filepath=error_output)
                     print(f"エラー時のシーンを保存: {error_output}")
-                except:
-                    pass
+                except Exception:
+                    pass  # エラーシーン保存失敗は無視可能
 
             # ペア処理後にキャッシュをクリアしてメモリを解放
             # チェーン処理でのメモリ蓄積によるOOMクラッシュを防止
