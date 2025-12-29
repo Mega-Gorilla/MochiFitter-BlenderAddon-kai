@@ -532,7 +532,7 @@ if __name__ == "__main__":
 
 ### 6.1 Phase 1（緊急修正）✅ 完了
 
-> **ステータス**: PR #38 で実装完了
+> **ステータス**: PR #38 および PR #39 で実装完了
 
 ```
 [x] 1.1 重複関数の削除
@@ -553,7 +553,7 @@ if __name__ == "__main__":
 
 [x] 1.4 BMesh メモリリークの修正
     [x] 3関数の .free() 追加（create_hinge_bone_group は try/finally 済み）
-    [ ] 2関数の try/finally 追加（transfer_weights_* - 大規模変更のため別PR）
+    [x] 2関数の try/finally 追加（transfer_weights_* - PR #39）
     [ ] チェーン処理でのメモリテスト
 ```
 
