@@ -731,9 +731,17 @@ def clear_all_caches():
 
     cache_stats = []
 
-    # _mesh_cache のクリア
+    # _mesh_cache のクリア（BMesh を適切に解放）
     if _mesh_cache:
         cache_stats.append(f"_mesh_cache: {len(_mesh_cache)} entries")
+        # BMesh.free() を確実に実行してからクリア
+        # 注: clear_mesh_cache() は後方で定義されているためここでは直接実装
+        for cache_data in _mesh_cache.values():
+            if 'bmesh' in cache_data and cache_data['bmesh']:
+                try:
+                    cache_data['bmesh'].free()
+                except Exception:
+                    pass  # 既に解放済みの場合は無視
         _mesh_cache.clear()
 
     # ポーズ状態のクリア
