@@ -4532,42 +4532,6 @@ def replace_humanoid_bones(base_armature: bpy.types.Object, clothing_armature: b
         # if not chosen_parent:
         #     # 既存手法: 頂点距離とボーン距離を使用する
         #     closest_point, normal, face_idx, vertex_distance = bvh.find_nearest(head_pos)
-        #     closest_bone = None
-        #     min_vertex_weight_distance = float('inf')
-
-        #     if closest_point and face_idx is not None:
-        #         face = bm.faces[face_idx]
-        #         vertex_indices = [v.index for v in face.verts]
-        #         closest_vert_idx = min(vertex_indices,
-        #                             key=lambda idx: (base_mesh.data.vertices[idx].co - closest_point).length)
-
-        #         max_weight = 0
-        #         vertex = base_mesh.data.vertices[closest_vert_idx]
-        #         for group_element in vertex.groups:
-        #             group_name = base_group_index_to_name.get(group_element.group)
-        #             if group_name in candidate_bones:
-        #                 weight = group_element.weight
-        #                 if weight > max_weight:
-        #                     max_weight = weight
-        #                     closest_bone = group_name
-        #                     min_vertex_weight_distance = vertex_distance
-
-        #     min_bone_distance = float('inf')
-        #     closest_bone_by_distance = None
-
-        #     for bone in base_armature.pose.bones:
-        #         if bone.name in candidate_bones:
-        #             bone_head_world = base_armature.matrix_world @ bone.head
-        #             distance = (head_pos - bone_head_world).length
-        #             if distance < min_bone_distance:
-        #                 min_bone_distance = distance
-        #                 closest_bone_by_distance = bone.name
-
-        #     if closest_bone_by_distance and min_bone_distance < min_vertex_weight_distance:
-        #         chosen_parent = closest_bone_by_distance
-        #     elif closest_bone:
-        #         chosen_parent = closest_bone
-
         if chosen_parent and chosen_parent == bone_name and bone_name in clothing_armature.data.bones and clothing_armature.data.bones.get(bone_name).parent:
             chosen_parent = clothing_armature.data.bones.get(bone_name).parent.name
             if chosen_parent not in candidate_bones:
@@ -7076,14 +7040,6 @@ def get_deformation_field_multi_step(field_data_path: str) -> dict:
 
     # kdtree_query_kの値を取得（存在しない場合はデフォルト値8を使用）
     k_neighbors = 8
-    # if 'kdtree_query_k' in data:
-    #     try:
-    #         k_value = data['kdtree_query_k']
-    #         k_neighbors = int(k_value)
-    #         print(f"kdtree_query_k value: {k_neighbors}")
-    #     except Exception as e:
-    #         print(f"Warning: Could not process kdtree_query_k value: {e}")
-    
     # RBFパラメータの読み込み
     rbf_epsilon = float(data.get('rbf_epsilon', 0.00001))
     print(f"RBF補間パラメータ: 関数=multi_quadratic_biharmonic, epsilon={rbf_epsilon}")
@@ -10426,22 +10382,7 @@ def apply_bone_field_delta(armature_obj: bpy.types.Object, field_data_path: str,
     #     rot_diff = old_dir.rotation_difference(new_dir)
 
     #     # 親ボーンに対して、親のHeadを中心にrot_diffを適用する
-    #     parent_world_matrix = armature_obj.matrix_world @ parent_bone.matrix
-    #     T = Matrix.Translation(new_parent_head)
-    #     T_inv = Matrix.Translation(-new_parent_head)
-    #     rot_matrix = rot_diff.to_matrix().to_4x4()
-    #     R = T @ rot_matrix @ T_inv
-    #     new_parent_world_matrix = R @ parent_world_matrix
-    #     parent_bone.matrix = armature_obj.matrix_world.inverted() @ new_parent_world_matrix
-
     #     # 子ボーンには、親の回転変化の影響が及ばないよう、逆の補正を適用する
-    #     child_world_matrix = armature_obj.matrix_world @ child_bone.matrix
-    #     compensation = T @ rot_matrix.inverted() @ T_inv
-    #     new_child_world_matrix = compensation @ child_world_matrix
-    #     child_bone.matrix = armature_obj.matrix_world.inverted() @ new_child_world_matrix
-
-    #     bpy.context.view_layer.update()
-
     bpy.context.view_layer.update()
     
     # オブジェクトモードに戻る
@@ -10801,6 +10742,11 @@ def select_vertices_by_conditions(target_object, vertex_group_name, avatar_data,
     print(f"検索半径: {radius}")
     print(f"最大角度: {max_angle_degrees}度")
     print(f"総頂点数: {len(target_object.data.vertices)}")
+
+
+# =============================================================================
+# Weight Transfer Functions
+# =============================================================================
 
 def transfer_weights_from_nearest_vertex(base_mesh, target_obj, vertex_group_name, angle_min=-1.0, angle_max=-1.0, normal_radius=0.0):
     """
@@ -13691,25 +13637,11 @@ def cluster_components_by_adaptive_distance(component_coords, component_sizes):
 #     target_groups = get_humanoid_and_auxiliary_bone_groups(base_avatar_data)
     
 #     # 処理対象のメッシュをフィルタリング（InpaintMaskを持つメッシュのみ）
-#     valid_meshes = []
-#     for mesh in clothing_meshes:
-#         if "InpaintMask" in mesh.vertex_groups:
-#             valid_meshes.append(mesh)
-    
-#     if not valid_meshes:
-#         print("No meshes with InpaintMask found, skipping normalization")
 #         return
     
 #     # 各メッシュに対して処理
 #     for mesh_obj in valid_meshes:
 #         # 元のメッシュを複製して細分化
-#         bpy.ops.object.select_all(action='DESELECT')
-#         mesh_obj.select_set(True)
-#         bpy.context.view_layer.objects.active = mesh_obj
-#         bpy.ops.object.duplicate(linked=False)
-#         subdiv_obj = bpy.context.active_object
-#         subdiv_obj.name = f"{mesh_obj.name}_TempSubdiv"
-        
 #         # 細分化モディファイアを追加
 #         subdiv_mod = subdiv_obj.modifiers.new(name="TempSubdivision", type='SUBSURF')
 #         subdiv_mod.levels = 1
@@ -13721,16 +13653,6 @@ def cluster_components_by_adaptive_distance(component_coords, component_sizes):
 #         bpy.context.view_layer.objects.active = mesh_obj
         
 #         # 頂点グループをコピー
-#         for group_name in target_groups:
-#             if group_name in mesh_obj.vertex_groups and group_name not in subdiv_obj.vertex_groups:
-#                 subdiv_obj.vertex_groups.new(name=group_name)
-        
-#         if "InpaintMask" in mesh_obj.vertex_groups and "InpaintMask" not in subdiv_obj.vertex_groups:
-#             subdiv_obj.vertex_groups.new(name="InpaintMask")
-        
-#         if "Rigid" in mesh_obj.vertex_groups and "Rigid" not in subdiv_obj.vertex_groups:
-#             subdiv_obj.vertex_groups.new(name="Rigid")
-        
 #         # 評価済みデータを取得
 #         depsgraph = bpy.context.evaluated_depsgraph_get()
 #         eval_subdiv_obj = subdiv_obj.evaluated_get(depsgraph)
@@ -13746,12 +13668,6 @@ def cluster_components_by_adaptive_distance(component_coords, component_sizes):
 #         all_vertices = []
 #         for vert_idx, vert in enumerate(eval_subdiv_mesh.vertices):
 #             # Rigid頂点グループのウェイトをチェック
-#             rigid_weight = 0.0
-#             if "Rigid" in subdiv_obj.vertex_groups:
-#                 rigid_group = subdiv_obj.vertex_groups["Rigid"]
-#                 for g in vert.groups:
-#                     if g.group == rigid_group.index:
-#                         rigid_weight = g.weight
 #                         break
             
 #             # Rigid頂点グループのウェイトが0より大きい頂点は無視
@@ -13759,35 +13675,16 @@ def cluster_components_by_adaptive_distance(component_coords, component_sizes):
 #                 continue
             
 #             # InpaintMaskのウェイトを取得
-#             inpaint_weight = 0.0
-#             if "InpaintMask" in subdiv_obj.vertex_groups:
-#                 inpaint_group = subdiv_obj.vertex_groups["InpaintMask"]
-#                 for g in vert.groups:
-#                     if g.group == inpaint_group.index:
-#                         inpaint_weight = g.weight
 #                         break
             
 #             # 頂点のワールド座標を計算
 #             world_pos = subdiv_obj.matrix_world @ vert.co
             
 #             # 対象グループのウェイトを収集
-#             weights = {}
-#             for group_name in target_groups:
-#                 if group_name in subdiv_obj.vertex_groups:
-#                     group = subdiv_obj.vertex_groups[group_name]
-#                     for g in vert.groups:
-#                         if g.group == group.index:
 #                             weights[group_name] = g.weight
 #                             break
             
 #             # 頂点に接続するエッジの方向ベクトルを収集
-#             edge_directions = []
-#             bm_vert = bm.verts[vert_idx]
-#             for edge in bm_vert.link_edges:
-#                 other_vert = edge.other_vert(bm_vert)
-#                 direction = (other_vert.co - bm_vert.co).normalized()
-#                 edge_directions.append(direction)
-            
 #             # 頂点データを保存
 #             all_vertices.append({
 #                 'vert_idx': vert_idx,
@@ -13798,12 +13695,6 @@ def cluster_components_by_adaptive_distance(component_coords, component_sizes):
 #             })
         
 #         # KDTreeを構築して近接頂点を効率的に検索
-#         positions = [v['world_pos'] for v in all_vertices]
-#         kdtree = KDTree(len(positions))
-#         for i, pos in enumerate(positions):
-#             kdtree.insert(pos, i)
-#         kdtree.balance()
-        
 #         # 重なっている頂点を検出してウェイトを揃える
 #         processed = set()  # 処理済みの頂点インデックスを記録
 #         normalized_weights = {}  # 正規化されたウェイト {vert_idx: {group_name: weight}}
@@ -13832,19 +13723,7 @@ def cluster_components_by_adaptive_distance(component_coords, component_sizes):
 #             overlapping_verts.sort(key=lambda x: x['inpaint_weight'])
             
 #             # InpaintMaskのウェイトが最小の頂点のウェイトを使用
-#             reference_vert = overlapping_verts[0]
-#             reference_weights = reference_vert['weights']
-#             min_inpaint_weight = reference_vert['inpaint_weight']
-#             same_weight_verts = [v for v in overlapping_verts if abs(v['inpaint_weight'] - min_inpaint_weight) < 0.0001]
-            
-#             if len(same_weight_verts) > 1:
 #                 # 平均ウェイトを計算
-#                 avg_weights = {}
-#                 for group_name in target_groups:
-#                     weights_sum = 0.0
-#                     count = 0
-#                     for v in same_weight_verts:
-#                         if group_name in v['weights']:
 #                             weights_sum += v['weights'][group_name]
 #                             count += 1
 #                     if count > 0:
@@ -13863,41 +13742,14 @@ def cluster_components_by_adaptive_distance(component_coords, component_sizes):
 #         # 細分化メッシュの頂点ウェイトを更新
 #         for vert_idx, weights in normalized_weights.items():
 #             # 既存のウェイトをクリア
-#             for group_name in target_groups:
-#                 if group_name in subdiv_obj.vertex_groups:
-#                     try:
-#                         subdiv_obj.vertex_groups[group_name].remove([vert_idx])
-#                     except RuntimeError:
 #                         pass
             
 #             # 新しいウェイトを適用
-#             for group_name, weight in weights.items():
-#                 if weight > 0:
-#                     if group_name not in subdiv_obj.vertex_groups:
-#                         subdiv_obj.vertex_groups.new(name=group_name)
-#                     subdiv_obj.vertex_groups[group_name].add([vert_idx], weight, 'REPLACE')
-        
 #         # 細分化メッシュから元のメッシュに結果を転送
 #         # KDTreeを使用して元のメッシュの各頂点に最も近い細分化メッシュの頂点を見つける
-#         original_verts_world = [mesh_obj.matrix_world @ v.co for v in mesh_obj.data.vertices]
-#         subdiv_verts_world = [subdiv_obj.matrix_world @ v.co for v in subdiv_obj.data.vertices]
-        
-#         subdiv_kdtree = KDTree(len(subdiv_verts_world))
-#         for i, pos in enumerate(subdiv_verts_world):
-#             subdiv_kdtree.insert(pos, i)
-#         subdiv_kdtree.balance()
-        
 #         # 元のメッシュの各頂点に対して最も近い細分化メッシュの頂点を見つけてウェイトを転送
 #         for i, orig_pos in enumerate(original_verts_world):
 #             # Rigid頂点グループのウェイトをチェック
-#             rigid_weight = 0.0
-#             if "Rigid" in mesh_obj.vertex_groups:
-#                 rigid_group = mesh_obj.vertex_groups["Rigid"]
-#                 rigid_group_index = rigid_group.index
-
-#                 for g in mesh_obj.data.vertices[i].groups:
-#                     if g.group == rigid_group_index:
-#                         rigid_weight = g.weight
 #                         break
             
 #             # Rigid頂点グループのウェイトが0より大きい頂点は無視
@@ -13932,12 +13784,6 @@ def cluster_components_by_adaptive_distance(component_coords, component_sizes):
 #                                     pass
                     
 #                     # 新しいウェイトを適用
-#                     for group_name, weight in normalized_weights[subdiv_idx].items():
-#                         if weight > 0:
-#                             if group_name not in mesh_obj.vertex_groups:
-#                                 mesh_obj.vertex_groups.new(name=group_name)
-#                             mesh_obj.vertex_groups[group_name].add([i], weight, 'REPLACE')
-        
 #         # 一時的な細分化メッシュを削除
 #         bpy.data.objects.remove(subdiv_obj, do_unlink=True)
     
@@ -15440,15 +15286,6 @@ def create_distance_normal_based_vertex_group(body_obj, cloth_obj, distance_thre
     
     # 衣装メッシュの面に対してKDTreeを構築
     kdtree_time_start = time.time()
-    # size = len(cloth_bm.faces)
-    # kd = mathutils.kdtree.KDTree(size)
-    
-    # for face_index, center in face_centers.items():
-    #     kd.insert(center, face_index)
-    
-    # kd.balance()
-    # kd = cKDTree(face_centers)
-    
     # 衣装メッシュの頂点に対してKDTreeを構築（新しい実装用）
     vertex_positions = []
     for vertex in cloth_bm.verts:
@@ -16622,13 +16459,6 @@ def apply_distance_normal_based_smoothing(body_obj, cloth_obj, distance_min=0.0,
     
     # 衣装メッシュの面に対してKDTreeを構築
     kdtree_time_start = time.time()
-    # size = len(cloth_bm.faces)
-    # kd = mathutils.kdtree.KDTree(size)
-    
-    # for face_index, center in face_centers.items():
-    #     kd.insert(center, face_index)
-    
-    # kd.balance()
     kd = cKDTree(face_centers)
     kdtree_time = time.time() - kdtree_time_start
     print(f"  KDTree構築: {kdtree_time:.2f}秒")
@@ -17097,33 +16927,6 @@ def process_weight_transfer(target_obj, armature, base_avatar_data, clothing_ava
                 create_distance_normal_based_vertex_group(bpy.data.objects["Body.BaseAvatar"], target_obj, max_distance_try, 0.005, 20.0, "InpaintMask", normal_radius=0.003, filter_mask=closing_filter_mask_weights)
                 
                 #デバッグ用にbpy.data.objects["Body.BaseAvatar"]をコピーしておく
-                # body_base_avatar_copy = bpy.data.objects["Body.BaseAvatar"].copy()
-                # body_base_avatar_copy.data = bpy.data.objects["Body.BaseAvatar"].data.copy()
-                # body_base_avatar_copy.name = "Body.BaseAvatar.Copy"
-                # bpy.context.scene.collection.objects.link(body_base_avatar_copy)
-
-                # target_obj_copy = target_obj.copy()
-                # target_obj_copy.data = target_obj.data.copy()
-                # target_obj_copy.name = target_obj.name + ".Copy"
-                # bpy.context.scene.collection.objects.link(target_obj_copy)
-
-                # current_mode = bpy.context.object.mode
-                # bpy.ops.object.mode_set(mode='OBJECT')
-                # current_active = bpy.context.active_object
-                # bpy.context.view_layer.objects.active = body_base_avatar_copy
-                # selection = bpy.context.selected_objects
-                # bpy.ops.object.select_all(action='DESELECT')
-                
-                # body_base_avatar_copy.select_set(True)
-                # target_obj_copy.select_set(True)
-                # bpy.ops.object.convert(target='MESH')
-
-                # bpy.ops.object.select_all(action='DESELECT')
-                # for obj in selection:
-                #     obj.select_set(True)
-                # bpy.context.view_layer.objects.active = current_active
-                # bpy.ops.object.mode_set(mode=current_mode)
-
                 # 指のボーンウェイトを持つ頂点がある場合、より精密なInpaintMaskを作成
                 # if finger_vertices and len(finger_vertices) > 0:
                 #     # normal_radius=0.001で精密なマスクを作成（一時的な名前で）
@@ -17131,16 +16934,6 @@ def process_weight_transfer(target_obj, armature, base_avatar_data, clothing_ava
                 #     create_distance_normal_based_vertex_group(bpy.data.objects["Body.BaseAvatar"], target_obj, max_distance_try, 0.003, 30.0, temp_mask_name, normal_radius=0.001)
                     
                 #     # 指の頂点のみ、精密なマスクの値で元のInpaintMaskを上書き
-                #     if temp_mask_name in target_obj.vertex_groups and "InpaintMask" in target_obj.vertex_groups:
-                #         temp_group = target_obj.vertex_groups[temp_mask_name]
-                #         inpaint_group = target_obj.vertex_groups["InpaintMask"]
-                        
-                #         for vert_idx in finger_vertices:
-                #             vert = target_obj.data.vertices[vert_idx]
-                #             weight = 0.0
-                #             for g in vert.groups:
-                #                 if target_obj.vertex_groups[g.group].name == temp_mask_name:
-                #                     weight = g.weight
                 #                     break
                 #             inpaint_group.add([vert_idx], weight, 'REPLACE')
                         
@@ -19434,6 +19227,10 @@ def update_cloth_metadata(metadata_dict: dict, output_path: str, vertex_index_ma
         print(f"Error saving cloth metadata: {e}")
 
 
+# =============================================================================
+# Main Processing Functions
+# =============================================================================
+
 def process_single_config(args, config_pair, pair_index, total_pairs, overall_start_time):
     try:
         # 設定ファイルの内容を出力
@@ -20237,13 +20034,6 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
             export_armature_record_to_json(args.output)
 
         # Save the current scene
-        # if pair_index == 1:
-        #     save_start = time.time()
-        #     output_blend = args.output.rsplit('.', 1)[0] + '.blend'
-        #     bpy.ops.wm.save_as_mainfile(filepath=output_blend)
-        #     save_end = time.time()
-        #     print(f"Blendファイル保存: {save_end - save_start:.2f}秒")
-        
         total_time = time.time() - start_time
         print(f"Progress: {(pair_index + 1.0) / total_pairs * 0.9:.3f}")
         print(f"処理完了: 合計 {total_time:.2f}秒")
@@ -20261,6 +20051,11 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
         bpy.ops.wm.save_as_mainfile(filepath=output_blend)
 
         return False
+
+
+# =============================================================================
+# Entry Point
+# =============================================================================
 
 def main():
     try:
@@ -20294,12 +20089,6 @@ def main():
                 print(f"{'='*60}")
                 
                 # Create output filename with index for multiple pairs
-                # if total_pairs > 1:
-                #     base_output = args.output.rsplit('.', 1)[0]
-                #     extension = args.output.rsplit('.', 1)[1] if '.' in args.output else 'fbx'
-                #     output_file = f"{base_output}_{pair_index + 1:03d}.{extension}"
-                # else:
-                #     output_file = args.output
                 output_file = args.output
                 
                 # Create a copy of args with updated output path
