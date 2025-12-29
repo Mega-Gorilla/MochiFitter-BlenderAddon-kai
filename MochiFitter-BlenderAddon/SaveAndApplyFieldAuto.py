@@ -5229,33 +5229,37 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
 
         # 一時ディレクトリを作成
         # 注意: Microsoft Store版Blenderではos.makedirs()が失敗するため、
-        # cmd /c mkdir を優先的に使用する
+        # Windowsでは cmd /c mkdir を優先的に使用する
         print(f"Creating temporary directory: {deps_new_path}")
 
-        def create_directory_windows(path: str) -> tuple:
+        def create_directory(path: str) -> tuple:
             """
-            Windowsでディレクトリを作成する。
-            Store版Blenderのサンドボックス環境に対応するため、
-            cmd /c mkdir を優先的に使用する。
+            クロスプラットフォームでディレクトリを作成する。
+            Windows: Store版Blenderのサンドボックス環境に対応するため、
+                     cmd /c mkdir を優先的に使用する。
+            Linux/macOS: os.makedirs() を使用する。
             """
-            # 方法1: cmd /c mkdir（Store版Blender対応）
-            try:
-                # 出力は不要なので DEVNULL を使用（UnicodeDecodeError 回避）
-                result = subprocess.run(
-                    ['cmd', '/c', 'mkdir', path],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    shell=False
-                )
-                if result.returncode == 0:
-                    return True, "cmd"
-                # 既に存在する場合もエラーコード1が返る
-                if os.path.isdir(path):
-                    return True, "cmd (already exists)"
-            except Exception as e:
-                print(f"  cmd /c mkdir exception: {e}")
+            import sys
 
-            # 方法2: os.makedirs（通常環境用フォールバック）
+            # Windowsの場合: cmd /c mkdir を優先（Store版Blender対応）
+            if sys.platform == 'win32':
+                try:
+                    # 出力は不要なので DEVNULL を使用（UnicodeDecodeError 回避）
+                    result = subprocess.run(
+                        ['cmd', '/c', 'mkdir', path],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        shell=False
+                    )
+                    if result.returncode == 0:
+                        return True, "cmd"
+                    # 既に存在する場合もエラーコード1が返る
+                    if os.path.isdir(path):
+                        return True, "cmd (already exists)"
+                except Exception as e:
+                    print(f"  cmd /c mkdir exception: {e}")
+
+            # os.makedirs（Linux/macOS、またはWindowsでcmdが失敗した場合のフォールバック）
             try:
                 os.makedirs(path, exist_ok=True)
                 return True, "os.makedirs"
@@ -5264,7 +5268,7 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
 
             return False, ""
 
-        success, method = create_directory_windows(deps_new_path)
+        success, method = create_directory(deps_new_path)
         if success:
             print(f"Created temporary directory ({method})")
         else:
@@ -5277,7 +5281,7 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         import zipfile
 
         wheels_path = os.path.join(deps_new_path, '_wheels')
-        success, method = create_directory_windows(wheels_path)
+        success, method = create_directory(wheels_path)
         if not success:
             return False, "", f"Failed to create wheel download directory: {wheels_path}"
         print(f"Created wheel download directory: {wheels_path}")
@@ -5354,14 +5358,14 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
                         # ディレクトリエントリの場合
                         if member.endswith('/'):
                             if target_path not in created_dirs:
-                                create_directory_windows(target_path)
+                                create_directory(target_path)
                                 created_dirs.add(target_path)
                             continue
 
                         # ファイルの場合：親ディレクトリを作成
                         parent_dir = os.path.dirname(target_path)
                         if parent_dir and parent_dir not in created_dirs:
-                            create_directory_windows(parent_dir)
+                            create_directory(parent_dir)
                             created_dirs.add(parent_dir)
 
                         # ファイルを展開

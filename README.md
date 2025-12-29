@@ -29,6 +29,26 @@ MochiFitterは、VRChat/VRMアバター向けの衣装リターゲティング�
 - NumPy
 - SciPy（アドオン内の再インストールボタンで導入可能）
 
+## 対応プラットフォーム
+
+| プラットフォーム | サポート状況 | 備考 |
+|-----------------|-------------|------|
+| Windows | ✅ 完全対応 | Microsoft Store版Blenderにも対応 |
+| Linux | ✅ 対応 | psutilは手動インストール推奨 |
+| macOS | ⚠️ 未検証 | 動作する可能性あり |
+
+### Linux ユーザー向け注意事項
+
+Linux環境では、メモリ監視機能に使用する`psutil`モジュールがバンドル版では動作しません。
+メモリ監視機能を有効にするには、Blender内蔵のPythonでpsutilをインストールしてください：
+
+```bash
+# Blender内蔵Pythonのパスを確認（例）
+/path/to/blender/4.x/python/bin/python3 -m pip install psutil
+```
+
+psutilがなくても基本機能は動作しますが、メモリ監視とCPU親和性設定が無効になります。
+
 ## ライセンス
 
 このプロジェクトはGNU General Public License v3.0の下で公開されています。詳細は[LICENSE.txt](MochiFitter-BlenderAddon/LICENSE.txt)を参照してください。
