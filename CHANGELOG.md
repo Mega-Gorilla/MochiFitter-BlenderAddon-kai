@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Unity アドオン**: チェーン処理時のメモリ不足クラッシュを修正 (Issue #34)
+  - `clear_all_caches()` 関数を追加（全グローバルキャッシュのクリア）
+  - ペア処理間でキャッシュクリアを実行
+  - `_deformation_field_cache` (NPZデータ、KDTree) の適切な解放
+  - `bpy.data.orphans_purge()` による Blender 孤立データの解放
+  - `gc.collect()` によるガベージコレクション強制実行
+
 ## [0.2.17] - 2025-12-29
 
 ### Added
