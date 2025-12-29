@@ -5281,7 +5281,7 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         import zipfile
 
         wheels_path = os.path.join(deps_new_path, '_wheels')
-        success, method = create_directory_windows(wheels_path)
+        success, method = create_directory(wheels_path)
         if not success:
             return False, "", f"Failed to create wheel download directory: {wheels_path}"
         print(f"Created wheel download directory: {wheels_path}")
@@ -5358,14 +5358,14 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
                         # ディレクトリエントリの場合
                         if member.endswith('/'):
                             if target_path not in created_dirs:
-                                create_directory_windows(target_path)
+                                create_directory(target_path)
                                 created_dirs.add(target_path)
                             continue
 
                         # ファイルの場合：親ディレクトリを作成
                         parent_dir = os.path.dirname(target_path)
                         if parent_dir and parent_dir not in created_dirs:
-                            create_directory_windows(parent_dir)
+                            create_directory(parent_dir)
                             created_dirs.add(parent_dir)
 
                         # ファイルを展開
