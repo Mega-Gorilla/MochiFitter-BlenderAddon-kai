@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Linux/macOS プラットフォームサポート (Issue #32)
+  - ディレクトリ作成処理のクロスプラットフォーム化
+  - psutil 未インストール時の graceful degradation
+  - CPU親和性設定の psutil 依存チェック追加
+  - README にプラットフォーム対応表と Linux ユーザー向け手順を追加
+
 ## [0.2.16] - 2025-12-29
 
 ### Added

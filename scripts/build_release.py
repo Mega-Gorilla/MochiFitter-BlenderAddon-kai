@@ -5,6 +5,11 @@ MochiFitter Blender Addon - Release Build Script
 This script creates a distributable ZIP file for the Blender addon.
 The ZIP can be installed directly in Blender via Edit > Preferences > Add-ons > Install.
 
+Cross-platform notes:
+- The bundled psutil binary (.pyd) only works on Windows
+- Linux/macOS users should install psutil via Blender's Python if memory monitoring is needed
+- Core functionality works without psutil (graceful degradation)
+
 Usage:
     python scripts/build_release.py [--output-dir DIR]
 

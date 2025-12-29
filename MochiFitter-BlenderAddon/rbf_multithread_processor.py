@@ -52,13 +52,16 @@ except ImportError:
 
 def set_cpu_affinity():
     """プロセスのCPU親和性を設定して全コアを活用"""
+    if not PSUTIL_AVAILABLE:
+        print("CPU affinity not set: psutil is not available")
+        return
     try:
         # 全論理プロセッサを使用
         all_cpus = list(range(psutil.cpu_count(logical=True)))
         psutil.Process().cpu_affinity(all_cpus)
-        print(f"CPU親和性を設定: {len(all_cpus)}個の論理プロセッサを使用")
+        print(f"CPU affinity set: using {len(all_cpus)} logical processors")
     except Exception as e:
-        print(f"CPU親和性設定に失敗: {e}")
+        print(f"Failed to set CPU affinity: {e}")
 
 class MemoryMonitor:
     """メモリ使用量を監視するクラス（psutil依存）"""
