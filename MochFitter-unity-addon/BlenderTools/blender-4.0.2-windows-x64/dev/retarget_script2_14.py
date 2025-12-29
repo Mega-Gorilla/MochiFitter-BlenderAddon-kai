@@ -706,7 +706,109 @@ _previous_pose_state = None
 
 _is_A_pose = False
 
+_armature_record_data = {}
+
 _unity_script_directory = None
+
+
+def get_shallowest_bone(armature: bpy.types.Object, avatar_data: dict = None) -> str:
+    """
+    アーマチュア内で最も階層の浅いボーンを取得する
+    
+    Parameters:
+        armature: アーマチュアオブジェクト
+        avatar_data: アバターデータ（Hipsボーン名を含む）
+    
+    Returns:
+        最も階層の浅いボーンの名前（複数ある場合はavatar_dataのHipsボーンを子孫に含むもの）
+    """
+    if not armature or armature.type != 'ARMATURE':
+        return None
+    
+    bones = armature.data.bones
+    if not bones:
+        return None
+    
+    # 親がないボーン（ルートボーン）を探す
+    root_bones = [bone for bone in bones if bone.parent is None]
+    
+    if not root_bones:
+        # 万が一ルートボーンが見つからない場合は最初のボーンを返す
+        return bones[0].name if bones else None
+    
+    if len(root_bones) == 1:
+        return root_bones[0].name
+    
+    # 複数のルートボーンがある場合、avatar_dataのHipsボーンを子孫に含むものを選択
+    if avatar_data:
+        hips_bone_name = None
+        for bone_map in avatar_data.get("humanoidBones", []):
+            if bone_map["humanoidBoneName"] == "Hips":
+                hips_bone_name = bone_map["boneName"]
+                break
+        if hips_bone_name and hips_bone_name in bones:
+            hips_bone = bones[hips_bone_name]
+            
+            # 各ルートボーンがHipsボーンを子孫に含むかチェック
+            for root_bone in root_bones:
+                # Hipsボーンからルートに向かって親をたどる
+                current = hips_bone
+                while current:
+                    if current == root_bone:
+                        return root_bone.name
+                    current = current.parent
+    
+    # 該当するものがなければ最初のルートボーンを返す
+    return root_bones[0].name
+
+
+def record_armature_info(clothing_armature: bpy.types.Object, clothing_meshes: list, clothing_avatar_data: dict, record_key: str) -> None:
+    """
+    clothing_armatureの名前と最も階層の浅いボーン名、clothing_meshesの名前を記録する
+    
+    Parameters:
+        clothing_armature: 服のアーマチュアオブジェクト
+        clothing_meshes: 服のメッシュオブジェクトのリスト
+        clothing_avatar_data: 服のアバターデータ
+        record_key: 記録するキー ('before' または 'after')
+    """
+    global _armature_record_data
+    
+    armature_name = clothing_armature.name if clothing_armature else None
+    shallowest_bone = get_shallowest_bone(clothing_armature, clothing_avatar_data)
+    mesh_names = [mesh.name for mesh in clothing_meshes] if clothing_meshes else []
+    
+    _armature_record_data[record_key] = {
+        "armature_name": armature_name,
+        "shallowest_bone": shallowest_bone,
+        "mesh_names": mesh_names
+    }
+    
+    print(f"Recorded armature info ({record_key}): armature_name={armature_name}, shallowest_bone={shallowest_bone}, mesh_count={len(mesh_names)}")
+
+
+def export_armature_record_to_json(output_path: str) -> None:
+    """
+    記録したアーマチュア情報をJSONファイルとして出力する
+    
+    Parameters:
+        output_path: FBX出力パス（このパスを元にJSONファイルパスを生成）
+    """
+    global _armature_record_data
+    
+    if not _armature_record_data:
+        print("No armature record data to export")
+        return
+    
+    # 出力パスからJSONファイルパスを生成
+    json_output_path = output_path.rsplit('.', 1)[0] + '_armature_info.json'
+    
+    try:
+        with open(json_output_path, 'w', encoding='utf-8') as f:
+            json.dump(_armature_record_data, f, indent=2, ensure_ascii=False)
+        print(f"Armature info exported to: {json_output_path}")
+    except Exception as e:
+        print(f"Error exporting armature info: {e}")
 
 
 def apply_y_rotation_to_bone(armature_obj: bpy.types.Object, bone_name: str, rotation_degrees: float) -> None:
@@ -19905,6 +20007,18 @@ def update_cloth_metadata(metadata_dict: dict, output_path: str, vertex_index_ma
 
 def process_single_config(args, config_pair, pair_index, total_pairs, overall_start_time):
     try:
+        # 設定ファイルの内容を出力
+        for key in ['config_path', 'base_avatar_data', 'clothing_avatar_data', 'pose_data']:
+            if key in config_pair and config_pair[key]:
+                file_path = config_pair[key]
+                print(f"\n===== {key}: {file_path} =====")
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        print(f.read())
+                except Exception as e:
+                    print(f"Error reading {file_path}: {e}")
+                print(f"===== End of {key} =====\n")
+        
         import time
         start_time = time.time()
 
@@ -19978,6 +20092,10 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
             except Exception as e:
                 print(f"Warning: ボーン名前変更処理でエラーが発生しました: {e}")
         
+        # pair_index == 0の時、アーマチュア情報を記録（before）
+        if pair_index == 0:
+            record_armature_info(clothing_armature, clothing_meshes, clothing_avatar_data, 'before')
+        
         if config_pair['hips_position']:
             adjust_armature_hips_position(clothing_armature, config_pair['hips_position'], clothing_avatar_data)
 
@@ -20019,7 +20137,7 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
             print(f"メッシュマテリアルデータ読み込み: {material_load_time - metadata_load_time:.2f}秒")
         else:
             material_load_time = metadata_load_time
-
+        
         # clothing_meshesの独立頂点とnon-finite頂点を削除
         for mesh_obj in clothing_meshes:
             if mesh_obj.type != 'MESH':
@@ -20668,6 +20786,10 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
         
         round_bone_coordinates(clothing_armature, decimal_places=6)
         
+        # pair_index == total_pairs - 1の時、アーマチュア情報を記録（after）
+        if pair_index == total_pairs - 1:
+            record_armature_info(clothing_armature, clothing_meshes, base_avatar_data, 'after')
+        
         # Export as FBX
         print("Status: FBXエクスポート中")
         print(f"Progress: {(pair_index + 0.98) / total_pairs * 0.9:.3f}")
@@ -20676,8 +20798,12 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
         export_end = time.time()
         print(f"FBXエクスポート: {export_end - export_start:.2f}秒")
 
+        # pair_index == total_pairs - 1の時、アーマチュア情報をJSONファイルに出力
+        if pair_index == total_pairs - 1:
+            export_armature_record_to_json(args.output)
+
         # Save the current scene
-        # if pair_index == 0:
+        # if pair_index == 1:
         #     save_start = time.time()
         #     output_blend = args.output.rsplit('.', 1)[0] + '.blend'
         #     bpy.ops.wm.save_as_mainfile(filepath=output_blend)
