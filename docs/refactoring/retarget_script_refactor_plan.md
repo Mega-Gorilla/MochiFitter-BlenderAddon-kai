@@ -538,20 +538,23 @@ if __name__ == "__main__":
 [x] 1.1 重複関数の削除
     [x] 両実装の差分確認
     [x] 1つの実装を削除（line 14175 の重複を削除）
-    [x] テスト実行
+    [x] 構文チェック（python -m py_compile）
+    [ ] E2Eテスト（Blenderでの動作確認）
 
 [x] 1.2 ハードコードオブジェクト名の修正
     [x] safe_remove_object 関数の追加
     [x] 呼び出し箇所の修正
-    [x] テスト実行
+    [x] 構文チェック
+    [ ] E2Eテスト
 
 [x] 1.3 裸の except: の修正
     [x] 5箇所すべてを修正
     [x] except Exception: または except ValueError: に変更
 
 [x] 1.4 BMesh メモリリークの修正
-    [x] 3関数の try/finally または .free() 追加
-    [x] チェーン処理でのメモリテスト
+    [x] 3関数の .free() 追加（create_hinge_bone_group は try/finally 済み）
+    [ ] 2関数の try/finally 追加（transfer_weights_* - 大規模変更のため別PR）
+    [ ] チェーン処理でのメモリテスト
 ```
 
 ### 6.2 Phase 2（コード品質改善）🔄 一部完了
