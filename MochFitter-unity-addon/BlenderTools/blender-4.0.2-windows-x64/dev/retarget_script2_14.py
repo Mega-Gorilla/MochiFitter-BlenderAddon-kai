@@ -696,6 +696,7 @@ from mathutils.bvhtree import BVHTree
 import mathutils
 import time
 from collections import deque, defaultdict
+import gc
 
 # グローバルキャッシュ辞書を追加
 _mesh_cache = {}
@@ -709,6 +710,65 @@ _is_A_pose = False
 _armature_record_data = {}
 
 _unity_script_directory = None
+
+
+def clear_all_caches():
+    """
+    全てのグローバルキャッシュをクリアし、メモリを解放する。
+
+    チェーン処理（複数の config ペアを連続処理する場合）において、
+    ペア間でこの関数を呼び出すことで、メモリ蓄積によるOOMクラッシュを防止する。
+
+    クリア対象:
+    - _mesh_cache: メッシュキャッシュ
+    - _saved_pose_state: 保存されたポーズ状態
+    - _previous_pose_state: 前回のポーズ状態
+    - _armature_record_data: アーマチュアレコードデータ
+    - _deformation_field_cache: Deformation Field キャッシュ（NPZデータ、KDTree）
+    """
+    global _mesh_cache, _saved_pose_state, _previous_pose_state, _armature_record_data
+    global _deformation_field_cache
+
+    cache_stats = []
+
+    # _mesh_cache のクリア
+    if _mesh_cache:
+        cache_stats.append(f"_mesh_cache: {len(_mesh_cache)} entries")
+        _mesh_cache.clear()
+
+    # ポーズ状態のクリア
+    if _saved_pose_state is not None:
+        cache_stats.append("_saved_pose_state: cleared")
+        _saved_pose_state = None
+    if _previous_pose_state is not None:
+        cache_stats.append("_previous_pose_state: cleared")
+        _previous_pose_state = None
+
+    # アーマチュアレコードデータのクリア
+    if _armature_record_data:
+        cache_stats.append(f"_armature_record_data: {len(_armature_record_data)} entries")
+        _armature_record_data.clear()
+
+    # Deformation Field キャッシュのクリア（最も大きなメモリ消費源）
+    if _deformation_field_cache:
+        cache_stats.append(f"_deformation_field_cache: {len(_deformation_field_cache)} entries")
+        _deformation_field_cache.clear()
+
+    # Blender の孤立データを解放
+    try:
+        orphans_removed = bpy.data.orphans_purge(do_recursive=True)
+        if orphans_removed > 0:
+            cache_stats.append(f"blender_orphans: {orphans_removed} removed")
+    except Exception as e:
+        print(f"[Memory] Warning: orphans_purge failed: {e}")
+
+    # ガベージコレクションを強制実行
+    gc.collect()
+
+    if cache_stats:
+        print(f"[Memory] Cleared caches: {', '.join(cache_stats)}")
+    else:
+        print("[Memory] No caches to clear")
 
 
 def get_shallowest_bone(armature: bpy.types.Object, avatar_data: dict = None) -> str:
@@ -20895,7 +20955,13 @@ def main():
                     print(f"エラー時のシーンを保存: {error_output}")
                 except:
                     pass
-        
+
+            # ペア処理後にキャッシュをクリアしてメモリを解放
+            # チェーン処理でのメモリ蓄積によるOOMクラッシュを防止
+            if pair_index < total_pairs - 1:  # 最後のペア以外でクリア
+                print(f"\n[Memory] Clearing caches after pair {pair_index + 1}...")
+                clear_all_caches()
+
         total_time = time.time() - start_time
         print(f"Progress: 1.00")
         print(f"\n{'='*60}")
