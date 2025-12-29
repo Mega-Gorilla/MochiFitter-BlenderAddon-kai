@@ -6,7 +6,7 @@ MochiFitter - Advanced Avatar Outfit Retargeting System for Blender
 bl_info = {
     "name": "MochiFitter-Kai",
     "author": "Community Fork (Original: MochiFitter Development Team)",
-    "version": (0, 2, 20),
+    "version": (0, 2, 21),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > MochiFitter",
     "description": "Community-optimized fork of MochiFitter - Avatar Outfit Retargeting System using RBF interpolation",
