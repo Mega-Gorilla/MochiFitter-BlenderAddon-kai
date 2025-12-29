@@ -10,13 +10,13 @@
 |------|-----|
 | パス | `MochFitter-unity-addon/BlenderTools/blender-4.0.2-windows-x64/dev/retarget_script2_14.py` |
 | 総行数 | 20,993行 |
-| 関数数 | 179 |
+| 関数数 | 231 |
 | クラス数 | 1 (TransitionCache) |
 
 ### 1.2 関連Issue
 
 - [Issue #36: retarget_script2_14.py: コード品質改善](https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/issues/36)
-- [Issue #34: チェーン処理時のメモリリーク](https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/issues/34) (解決済み)
+- [Issue #34: チェーン処理時のメモリリーク](https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/issues/34) (Closed - PR #35 で解決)
 
 ---
 
