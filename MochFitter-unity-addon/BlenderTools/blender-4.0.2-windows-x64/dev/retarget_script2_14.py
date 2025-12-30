@@ -39,6 +39,7 @@ import mathutils
 import time
 from collections import deque, defaultdict
 import gc
+import hashlib
 
 # =============================================================================
 # Constants
@@ -334,8 +335,11 @@ def get_cached_kdtree(coords: np.ndarray, cache_key: str = None,
     # キャッシュキーの生成
     if cache_key is None:
         # 全座標のハッシュを使用（安全性重視：座標が1つでも変われば異なるキー）
-        # コスト: ~0.16ms for 25k vertices（KDTree構築の10-50msに比べて無視できる）
-        cache_key = f"kdtree_{hash(coords.tobytes())}"
+        # blake2b: 固定ハッシュ（Pythonのhash()はプロセスごとにランダム化される）
+        # パラメータも含めて将来の変更に対応
+        # コスト: ~0.2ms for 25k vertices（KDTree構築の10-50msに比べて無視できる）
+        coord_hash = hashlib.blake2b(coords.tobytes(), digest_size=16).hexdigest()
+        cache_key = f"kdtree_{coord_hash}_bt{balanced_tree}_cn{compact_nodes}"
 
     # キャッシュから取得または新規構築
     if cache_key in _context.kdtree_cache:
