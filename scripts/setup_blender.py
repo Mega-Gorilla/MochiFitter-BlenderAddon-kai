@@ -335,12 +335,26 @@ def install_blender(version: str, force: bool = False) -> Path:
             raise RuntimeError(f"Unsupported archive format: {ext}")
 
         # インストール先に移動
+        # dev/ ディレクトリを保護（retarget_script などが配置されている）
+        dev_backup = None
         if install_dir.exists():
+            dev_dir = install_dir / "dev"
+            if dev_dir.exists():
+                dev_backup = temp_path / "dev_backup"
+                print(f"Backing up dev/ directory: {dev_dir}")
+                shutil.copytree(dev_dir, dev_backup)
+
             print(f"Removing existing installation: {install_dir}")
             shutil.rmtree(install_dir)
 
         print(f"Installing to: {install_dir}")
         shutil.move(str(extracted_dir), str(install_dir))
+
+        # dev/ ディレクトリを復元
+        if dev_backup and dev_backup.exists():
+            restored_dev = install_dir / "dev"
+            print(f"Restoring dev/ directory: {restored_dev}")
+            shutil.copytree(dev_backup, restored_dev)
 
     # インストール確認
     if not executable.exists():
