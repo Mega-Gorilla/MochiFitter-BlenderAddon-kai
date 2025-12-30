@@ -1,0 +1,8 @@
+{
+  "timestamp": "2025-12-30 22:03:49",
+  "optimization": "P1-0 + P1-1 (foreach_get + KDTree caching)",
+  "duration_sec": 85.37538385391235,
+  "peak_rss_mb": 2543.50390625,
+  "peak_vms_mb": 3556.64453125,
+  "sample_count": 165
+}
