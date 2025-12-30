@@ -151,7 +151,7 @@ def compute_distances_from_point(center, neighbor_coords):
 > **Note**: この関数は `kdtree.query_ball_point()` で取得した近傍点に対して使用します。
 > 全頂点×全頂点の距離行列を計算するのではなく、各頂点の近傍のみを処理します。
 
-**期待効果:** +100-300%（距離計算部分）
+**期待効果:** +20-30%（実測: 10k頂点で1.30x、30k頂点で1.24x）
 **リスク:** 低（Numba未インストール時はフォールバック）
 **実装難度:** 低
 
@@ -192,9 +192,12 @@ def apply_smoothing_vectorized(vertex_coords, current_weights, smoothing_radius,
     return smoothed_weights
 ```
 
-**期待効果:** +30-50%
+**期待効果:** +0-35%（実測: 10k頂点で1.33x、30k頂点で1.04x）
 **リスク:** 低
 **実装難度:** 低
+
+> **Note**: 大規模データでは一括取得のオーバーヘッドにより効果が薄れる。
+> 小規模メッシュ（~10k頂点）向けに限定的に採用を検討。
 
 ---
 
@@ -220,8 +223,11 @@ def get_cached_kdtree(vertex_coords_hash, vertex_coords):
     return _kdtree_cache[vertex_coords_hash]
 ```
 
-**期待効果:** +20-30%（KDTree構築コスト削減）
+**期待効果:** +40-65%（実測: 10k頂点で1.66x、30k頂点で1.44x、3イテレーション時）
 **リスク:** 低（メモリ使用量増加に注意）
+
+> **Note**: イテレーション数が多いほど効果大。最も効果が高く実装リスクが低いため、**最優先で実装推奨**。
+
 **実装難度:** 低
 
 ---
@@ -590,3 +596,4 @@ blender --background --python retarget_script2_14.py -- \
 | 2025-12-30 | 1.1 | PR #49 レビュー対応: ベンチマーク表追加、compute_distances修正、psutil依存追記、ベンチマーク手順修正 |
 | 2025-12-30 | 1.2 | Numba互換性調査結果追加、BMesh並列処理制約、foreach_get前提条件を明記 |
 | 2025-12-30 | 1.3 | Phase 1 最適化ベンチマーク実測結果追加（10k/30k頂点、Numba JIT、query_ball_tree、KDTree caching）|
+| 2025-12-30 | 1.4 | 各最適化施策の「期待効果」を実測値に基づいて修正 |
