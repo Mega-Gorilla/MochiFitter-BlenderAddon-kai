@@ -14,9 +14,13 @@ Issue #36 のリファクタリング完了後、次のステップとして処�
 
 | マイルストーン | 現在 | 目標 | 短縮率 |
 |---------------|------|------|--------|
-| Phase 1 完了 | 287秒 | 180-200秒 | 30-40% |
-| Phase 2 完了 | - | 120-150秒 | 45-60% |
-| (Phase 3 GPU) | - | 60-90秒 | 70-80% |
+| Phase 1 完了（P1-0 のみ） | 287秒 | 60-120秒 | 60-80% |
+| Phase 1 完了（全施策） | - | 40-80秒 | 70-85% |
+| Phase 2 完了 | - | 30-60秒 | 80-90% |
+| (Phase 3 GPU) | - | 15-30秒 | 90-95% |
+
+> **Note**: P1-0 (foreach_get + NumPy batch) のベンチマーク結果（~20x）を反映し、目標を上方修正。
+> 実際の効果は処理内容により異なるため、段階的に検証が必要。
 
 ### 1.3 関連Issue/PR
 
@@ -115,9 +119,67 @@ def transfer_weights_from_nearest_vertex(base_mesh, target_obj, ...):
 
 ### 3.1 Phase 1: 低リスク・即効性のある改善
 
-> **優先順位**: ベンチマーク結果に基づき、効果の高い順に並べ替え済み
+> **優先順位**: ベンチマーク結果に基づき、効果の高い順に並べ替え済み（2025-12-30 更新）
 
-#### P1-1: KDTree共有による再構築回避 ★最優先
+#### P1-0: foreach_get + NumPy batch 一括変換 ★★★最優先
+
+**対象ファイル:** `retarget_script2_14.py`（52箇所以上）
+
+**レビュアー指摘により追加**: 頂点ごとのPythonループ内で Vector 生成や行列変換を繰り返している箇所を配列化→一括変換に寄せる。
+
+**現在の実装（遅い）:**
+```python
+# パターン1: 頂点抽出 + 行列変換（~18-230ms per 10k-100k vertices）
+vertices_world = np.array([matrix @ v.co for v in mesh.vertices])
+
+# パターン2: Vector生成 + 行列変換（~25-300ms per 10k-100k vertices）
+transformed = np.array([matrix @ Vector(v) for v in vertices])
+
+# パターン3: 単純な頂点抽出（~2-25ms per 10k-100k vertices）
+coords = [v.co[:] for v in mesh.vertices]
+```
+
+**最適化後（高速）:**
+```python
+# 1. foreach_get で頂点座標を一括抽出（10-15x 高速）
+num_verts = len(mesh.vertices)
+coords = np.empty(num_verts * 3, dtype=np.float64)
+mesh.vertices.foreach_get("co", coords)
+coords = coords.reshape(-1, 3)
+
+# 2. NumPy行列演算で一括変換（100-250x 高速）
+rotation = np.array(matrix)[:3, :3]
+translation = np.array(matrix)[:3, 3]
+vertices_world = coords @ rotation.T + translation
+```
+
+**期待効果:** **+1900-2100%（約20倍）**
+- 頂点抽出: 14-16x 高速化
+- 行列変換: 100-250x 高速化
+- 複合処理: **約20x 高速化**
+
+**リスク:** 低（Blender標準API、追加依存なし）
+**実装難度:** 中（適用箇所が多い: 52箇所以上）
+
+> **ベンチマーク結果（2025-12-30 実測）:**
+> | 頂点数 | 現行パターン | foreach_get + NumPy | **Speedup** |
+> |--------|-------------|---------------------|-------------|
+> | 10,000 | 18.83 ms | 0.91 ms | **20.76x** |
+> | 30,000 | 59.98 ms | 2.79 ms | **21.46x** |
+> | 100,000 | 229.76 ms | 11.76 ms | **19.53x** |
+
+**主な適用箇所（retarget_script2_14.py）:**
+| 行番号 | パターン | 優先度 |
+|--------|----------|--------|
+| 882 | `np.array([matrix @ Vector(v) for v in vertices])` | 高 |
+| 1483 | `np.array([matrix @ v.co for v in mesh.vertices])` | 高 |
+| 5439, 6169, 7907 | バッチ処理内のループ | 高 |
+| 5969, 6024, 6059, 6145 | deformation処理内 | 高 |
+| 9921, 12095, 13380 | ウェイト転送関連 | 中 |
+
+---
+
+#### P1-1: KDTree共有による再構築回避
 
 **対象ファイル:** `smoothing_processor.py`
 
@@ -325,6 +387,36 @@ def incremental_weight_update(changed_vertices, bvh_tree, ...):
 
 ## 3.4 Phase 1 最適化ベンチマーク結果（2025-12-30 実測）
 
+### 3.4.1 foreach_get + NumPy batch ベンチマーク
+
+`tests/foreach_get_benchmark.py` を使用して Blender 4.0.2 で実測。
+
+#### Vertex Extraction: foreach_get vs list comprehension
+
+| 頂点数 | list_comprehension | foreach_get | **Speedup** |
+|--------|-------------------|-------------|-------------|
+| 10,000 | 2.25 ms | 0.15 ms | **15.15x** |
+| 30,000 | 6.93 ms | 0.43 ms | **16.05x** |
+| 100,000 | 25.51 ms | 1.82 ms | **14.02x** |
+
+#### Matrix Transformation: Loop vs NumPy batch
+
+| 頂点数 | loop_vector | numpy_batch | **Speedup** |
+|--------|-------------|-------------|-------------|
+| 10,000 | 25.48 ms | 0.10 ms | **244x** |
+| 30,000 | 76.63 ms | 0.31 ms | **247x** |
+| 100,000 | 302.15 ms | 1.82 ms | **166x** |
+
+#### Combined (Real-world pattern)
+
+| 頂点数 | 現行パターン | foreach_get + NumPy | **Speedup** |
+|--------|-------------|---------------------|-------------|
+| 10,000 | 18.83 ms | 0.91 ms | **20.76x** |
+| 30,000 | 59.98 ms | 2.79 ms | **21.46x** |
+| 100,000 | 229.76 ms | 11.76 ms | **19.53x** |
+
+### 3.4.2 スムージング処理ベンチマーク
+
 `tests/optimization_benchmark.py` を使用して実測したベンチマーク結果。
 
 ### テスト環境
@@ -353,18 +445,24 @@ def incremental_weight_update(changed_vertices, bvh_tree, ...):
 | P1-3: KDTree rebuild (3回) | 6727.60 ms | - | - | - |
 | P1-3: KDTree shared (3回) | 4681.66 ms | **1.44x** | - | - |
 
-### 考察
+### 3.4.3 考察
 
-1. **P1-1 (Numba JIT)**: 安定して **20-30% 高速化**。距離計算のJITコンパイルが効果的。
-2. **P1-2 (query_ball_tree)**: 小規模データでは効果的だが、**大規模データでは効果が薄れる**（一括取得のオーバーヘッド）。
-3. **P1-3 (KDTree caching)**: 複数イテレーションで **44-66% 高速化**。イテレーション数が多いほど効果大。
-4. **精度**: MSE は 10^-14 〜 10^-15 レベルで、**実質的に精度劣化なし**。
+1. **P1-0 (foreach_get + NumPy batch)**: **約20倍高速化**。最も効果が大きく、追加依存なし。レビュアー指摘通り**最優先**で実装すべき。
+2. **P1-1 (KDTree caching)**: 複数イテレーションで **44-66% 高速化**。イテレーション数が多いほど効果大。
+3. **P1-2 (Numba JIT)**: 安定して **20-30% 高速化**。距離計算のJITコンパイルが効果的。オプション依存。
+4. **P1-3 (query_ball_tree)**: 小規模データでは効果的だが、**大規模データでは効果が薄れる**（一括取得のオーバーヘッド）。
+5. **精度**: MSE は 10^-14 〜 10^-16 レベルで、**実質的に精度劣化なし**。
 
-### 推奨実装優先順位
+### 3.4.4 推奨実装優先順位
 
-1. **P1-1 (KDTree caching)**: 最も効果が高く（+40-65%）、実装リスクが低い
-2. **P1-2 (Numba JIT)**: 安定した効果（+20-30%）、ただしオプション依存として実装
-3. **P1-3 (query_ball_tree)**: 小規模メッシュ向けに限定的（+0-35%）
+| 優先度 | 施策 | 効果 | 依存 | リスク |
+|--------|------|------|------|--------|
+| ★★★ | **P1-0: foreach_get + NumPy batch** | **~20x** | なし | 低 |
+| ★★ | P1-1: KDTree caching | +40-65% | なし | 低 |
+| ★ | P1-2: Numba JIT | +20-30% | numba | 低 |
+| - | P1-3: query_ball_tree | +0-35% | なし | 低 |
+
+> **Note**: P1-0 だけで大幅な高速化が期待できるため、まずこれに集中し、効果を実測してから P1-1 以降を検討することを推奨。
 
 ---
 
@@ -374,8 +472,9 @@ def incremental_weight_update(changed_vertices, bvh_tree, ...):
 
 ```
 Phase 1 (低リスク・即効):
-├─ [ ] P1-1: KDTree共有による再構築回避 ★最優先 (+40-65%)
-├─ [ ] P1-2: Numba JIT による距離計算高速化 (+20-30%)
+├─ [ ] P1-0: foreach_get + NumPy batch ★★★最優先 (+1900-2100%)
+├─ [ ] P1-1: KDTree共有による再構築回避 (+40-65%)
+├─ [ ] P1-2: Numba JIT による距離計算高速化（オプション）(+20-30%)
 ├─ [ ] P1-3: スムージング処理のベクトル化（限定的）(+0-35%)
 └─ [ ] ベンチマーク・回帰テスト
 
@@ -598,3 +697,4 @@ blender --background --python retarget_script2_14.py -- \
 | 2025-12-30 | 1.2 | Numba互換性調査結果追加、BMesh並列処理制約、foreach_get前提条件を明記 |
 | 2025-12-30 | 1.3 | Phase 1 最適化ベンチマーク実測結果追加（10k/30k頂点、Numba JIT、query_ball_tree、KDTree caching）|
 | 2025-12-30 | 1.4 | 各最適化施策の「期待効果」を実測値に基づいて修正、優先度順に並び替え |
+| 2025-12-30 | 1.5 | **P1-0: foreach_get + NumPy batch 追加（~20x効果）**、レビュアー意見に基づく再調査、目標時間上方修正 |
