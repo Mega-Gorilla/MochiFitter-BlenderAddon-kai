@@ -49,6 +49,38 @@ Linux環境では、メモリ監視機能に使用する`psutil`モジュール�
 
 psutilがなくても基本機能は動作しますが、メモリ監視とCPU親和性設定が無効になります。
 
+## 開発環境セットアップ
+
+ローカル開発・E2Eテストを行うには、以下の手順でBlender環境をセットアップしてください。
+
+### 1. Blenderのインストール
+
+```bash
+python scripts/setup_blender.py
+```
+
+これにより以下がセットアップされます：
+- Blender 4.0.2（もちふぃった～公式推奨バージョン）
+- scipy, numpy（Blender内蔵Pythonにインストール）
+
+### 2. robust-weight-transfer アドオンのコピー（必須）
+
+E2Eテスト（`run_retarget.py`）を実行するには、もちふぃった～ Unityパッケージに同梱されている`robust-weight-transfer`アドオンを手動でコピーする必要があります。
+
+```
+コピー元: <MochiFitter Unity Project>/BlenderTools/blender-4.0.2-windows-x64/4.0/scripts/addons/robust-weight-transfer/
+コピー先: MochFitter-unity-addon/BlenderTools/blender-4.0.2-windows-x64/4.0/scripts/addons/robust-weight-transfer/
+```
+
+> **Note**: このアドオンはGitHubリポジトリには含まれていません。もちふぃった～を購入後、Unityプロジェクトからコピーしてください。
+
+### 3. E2Eテストの実行
+
+```bash
+cd MochFitter-unity-addon/OutfitRetargetingSystem
+python run_retarget.py --preset beryl_to_mao
+```
+
 ## ライセンス
 
 このプロジェクトはGNU General Public License v3.0の下で公開されています。詳細は[LICENSE.txt](MochiFitter-BlenderAddon/LICENSE.txt)を参照してください。
