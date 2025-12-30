@@ -44,6 +44,15 @@ wheels/
 *.blend1
 *.blend2
 
+# BlenderTools/ 内の Blender 本体（setup_blender.py でダウンロード）
+# dev/ ディレクトリのスクリプトは追跡する
+MochFitter-unity-addon/BlenderTools/blender-*-windows-x64/
+MochFitter-unity-addon/BlenderTools/blender-*-linux-x64/
+MochFitter-unity-addon/BlenderTools/blender-*-macos-*/
+!MochFitter-unity-addon/BlenderTools/blender-*-windows-x64/dev/
+!MochFitter-unity-addon/BlenderTools/blender-*-linux-x64/dev/
+!MochFitter-unity-addon/BlenderTools/blender-*-macos-*/dev/
+
 # -------------------------------------------
 # Addon Dependencies (installed by user)
 # -------------------------------------------

@@ -52,15 +52,60 @@ PRESETS = {
 
 
 def find_blender() -> Path:
-    """Find Blender executable."""
+    """Find Blender executable.
+
+    Search order:
+    1. BLENDER_PATH environment variable
+    2. BlenderTools/ directory (setup_blender.py でインストールしたもの)
+    3. Common installation paths (Windows/Linux/macOS)
+    4. PATH
+    """
     import shutil
+    import platform as pf
 
     # Check BLENDER_PATH environment variable first
     env_path = os.environ.get("BLENDER_PATH")
     if env_path and Path(env_path).exists():
         return Path(env_path)
 
-    # Check local BlenderTools
+    # Check BlenderTools/ for setup_blender.py installed versions
+    # 優先順: デフォルトバージョン (4.0.2) > 最新バージョン
+    if BLENDER_TOOLS_DIR.exists():
+        system = pf.system().lower()
+
+        # プラットフォーム別の実行ファイル名
+        if system == "windows":
+            exe_name = "blender.exe"
+            pattern = "blender-*-windows-x64"
+        elif system == "linux":
+            exe_name = "blender"
+            pattern = "blender-*-linux-x64"
+        elif system == "darwin":
+            exe_name = "Blender.app/Contents/MacOS/Blender"
+            pattern = "blender-*-macos-*"
+        else:
+            exe_name = "blender"
+            pattern = "blender-*"
+
+        # デフォルトバージョン (4.0.2) を優先的にチェック
+        default_dir = BLENDER_TOOLS_DIR / f"blender-4.0.2-{'windows-x64' if system == 'windows' else 'linux-x64' if system == 'linux' else 'macos-arm64'}"
+        default_exe = default_dir / exe_name
+        if default_exe.exists():
+            return default_exe
+
+        # BlenderTools/ 内の全バージョンをチェック (バージョン番号降順)
+        import glob
+        blender_dirs = sorted(
+            BLENDER_TOOLS_DIR.glob(pattern),
+            key=lambda p: p.name,
+            reverse=True  # 最新バージョン優先
+        )
+        for blender_dir in blender_dirs:
+            exe_path = blender_dir / exe_name
+            if exe_path.exists():
+                return exe_path
+
+    # Legacy: 固定パスのチェック (後方互換性)
     local_blender = BLENDER_TOOLS_DIR / "blender.exe"
     if local_blender.exists():
         return local_blender
@@ -72,9 +117,23 @@ def find_blender() -> Path:
         Path(r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe"),
         Path(r"C:\Program Files\Blender Foundation\Blender 4.3\blender.exe"),
     ]
-    for p in common_paths:
-        if p.exists():
-            return p
+
+    # Linux common paths
+    linux_paths = [
+        Path("/usr/bin/blender"),
+        Path("/snap/bin/blender"),
+        Path.home() / ".local/bin/blender",
+    ]
+
+    system = pf.system().lower()
+    if system == "windows":
+        for p in common_paths:
+            if p.exists():
+                return p
+    elif system == "linux":
+        for p in linux_paths:
+            if p.exists():
+                return p
 
     # Check PATH
     blender_path = shutil.which("blender")
@@ -82,7 +141,8 @@ def find_blender() -> Path:
         return Path(blender_path)
 
     raise FileNotFoundError(
-        "Blender not found. Set BLENDER_PATH environment variable or install Blender 4.0+."
+        "Blender not found. Run 'python scripts/setup_blender.py' to install, "
+        "or set BLENDER_PATH environment variable."
     )
 
 
