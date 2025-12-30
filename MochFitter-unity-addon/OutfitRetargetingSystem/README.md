@@ -63,6 +63,40 @@ OutfitRetargetingSystem/
 
 Unity を介さずに `retarget_script2_14.py` を直接実行してテストできます。
 
+### 環境変数の設定
+
+以下の環境変数を設定してください：
+
+| 環境変数 | 説明 | 例 |
+|---------|------|-----|
+| `BLENDER_PATH` | Blender 実行ファイルのパス | `C:\Program Files\Blender Foundation\Blender 4.0\blender.exe` |
+| `RETARGET_SCRIPT_PATH` | retarget_script2_14.py のパス | `D:\BlenderTools\dev\retarget_script2_14.py` |
+
+**PowerShell での設定例:**
+```powershell
+$env:BLENDER_PATH = "C:\Program Files\Blender Foundation\Blender 4.0\blender.exe"
+$env:RETARGET_SCRIPT_PATH = "D:\path\to\retarget_script2_14.py"
+```
+
+**コマンドプロンプト での設定例:**
+```batch
+set BLENDER_PATH=C:\Program Files\Blender Foundation\Blender 4.0\blender.exe
+set RETARGET_SCRIPT_PATH=D:\path\to\retarget_script2_14.py
+```
+
+### CLI ラッパースクリプト（推奨）
+
+`run_retarget.py` を使用すると簡単にテストできます：
+
+```batch
+python run_retarget.py --preset beryl_to_mao --benchmark
+```
+
+オプション:
+- `--preset`: プリセット設定を使用（`beryl_to_mao`）
+- `--benchmark`: ベンチマーク結果を記録
+- `--list-presets`: 利用可能なプリセットを表示
+
 ### 必要なファイル配置
 
 ```

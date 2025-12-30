@@ -67,10 +67,10 @@ def find_blender() -> Path:
 
     # Common installation paths (Windows)
     common_paths = [
-        Path(r"D:\vrchat\mao_avator - mochifitter\BlenderTools\blender-4.0.2-windows-x64\blender.exe"),
         Path(r"C:\Program Files\Blender Foundation\Blender 4.0\blender.exe"),
         Path(r"C:\Program Files\Blender Foundation\Blender 4.1\blender.exe"),
         Path(r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe"),
+        Path(r"C:\Program Files\Blender Foundation\Blender 4.3\blender.exe"),
     ]
     for p in common_paths:
         if p.exists():
@@ -87,18 +87,26 @@ def find_blender() -> Path:
 
 
 def find_retarget_script() -> Path:
-    """Find retarget_script2_14.py."""
+    """Find retarget_script2_14.py.
+
+    Search order:
+    1. RETARGET_SCRIPT_PATH environment variable
+    2. Local BlenderTools/dev/ directory
+    """
+    # Check environment variable first
+    env_path = os.environ.get("RETARGET_SCRIPT_PATH")
+    if env_path and Path(env_path).exists():
+        return Path(env_path)
+
     # Check local BlenderTools
     script_path = BLENDER_TOOLS_DIR / "dev" / "retarget_script2_14.py"
     if script_path.exists():
         return script_path
 
-    # Check external location
-    external_path = Path(r"D:\vrchat\mao_avator - mochifitter\BlenderTools\blender-4.0.2-windows-x64\dev\retarget_script2_14.py")
-    if external_path.exists():
-        return external_path
-
-    raise FileNotFoundError(f"retarget_script2_14.py not found at {script_path}")
+    raise FileNotFoundError(
+        f"retarget_script2_14.py not found. "
+        f"Set RETARGET_SCRIPT_PATH environment variable or place script at {script_path}"
+    )
 
 
 def resolve_path(path: str) -> Path:
