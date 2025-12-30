@@ -6,9 +6,9 @@
 # 有料コンテンツ（公開禁止）
 # -------------------------------------------
 # Unity側DLLとデータファイル（有料アドオン）
-# OutfitRetargetingSystem 内のファイルを除外（README.md は追跡）
-MochFitter-unity-addon/OutfitRetargetingSystem/*
-!MochFitter-unity-addon/OutfitRetargetingSystem/README.md
+# OutfitRetargetingSystem 内のファイルを全て除外（README.md のみ追跡）
+MochFitter-unity-addon/OutfitRetargetingSystem/Editor/
+MochFitter-unity-addon/OutfitRetargetingSystem/Outputs/
 
 # BlenderTools/ は GPL v3 ライセンスのため公開OK
 

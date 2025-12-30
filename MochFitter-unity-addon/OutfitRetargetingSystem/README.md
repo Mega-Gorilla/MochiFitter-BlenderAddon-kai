@@ -59,9 +59,57 @@ OutfitRetargetingSystem/
    - Unity で Assets フォルダに配置
    - Outfit Retargeting System ウィンドウを開く
 
+## CLI テスト環境（Unity を使わずにテスト）
+
+Unity を介さずに `retarget_script2_14.py` を直接実行してテストできます。
+
+### 必要なファイル配置
+
+```
+OutfitRetargetingSystem/
+├── Editor/
+│   ├── base_project.blend              # ベース Blender プロジェクト
+│   ├── Template.fbx                    # Template アバター
+│   ├── avatar_data_template.json       # Template アバター情報
+│   ├── avatar_data_<avatar>.json       # 対象アバター情報
+│   ├── config_<src>2<dst>.json         # リターゲット設定
+│   ├── deformation_*.npz               # 変形フィールドデータ
+│   ├── posediff_*.json                 # ポーズ差分データ
+│   ├── pose_basis_*.json               # ベースポーズデータ
+│   └── TestingDatasets/
+│       └── <clothing>.fbx              # テスト用衣装 FBX
+└── Outputs/
+    └── empty_pose.json                 # 空ポーズファイル（{"bones": []}）
+```
+
+### CLI 実行例（Beryl → Template → mao）
+
+```batch
+"<BlenderPath>\blender.exe" --background ^
+  --python "<BlenderPath>\dev\retarget_script2_14.py" ^
+  -- ^
+  --input="Editor\TestingDatasets\Beryl_Costumes.fbx" ^
+  --output="Outputs\cli_test_output.fbx" ^
+  --base="Editor\base_project.blend" ^
+  --base-fbx="Editor\Template.fbx;<mao.fbx path>" ^
+  --config="Editor\config_beryl2template.json;Editor\config_template2mao.json" ^
+  --init-pose="Outputs\empty_pose.json" ^
+  --hips-position=0.00000000,0.00955725,0.93028500 ^
+  --target-meshes="Costume_Body;Costume_Frill_Arm;..." ^
+  --blend-shapes=Highheel ^
+  --blend-shape-values=1.000 ^
+  --no-subdivision
+```
+
+### 注意事項
+
+- `empty_pose.json` は `{"bones": []}` の内容で作成
+- `<BlenderPath>` は Blender 4.0+ のインストールパス
+- チェーン処理（例: Beryl → Template → mao）は `--base-fbx` と `--config` をセミコロンで区切る
+
 ## 関連ドキュメント
 
-- [BlenderScripts](../BlenderScripts/) - Blender 側スクリプト
+- [BlenderTools/dev/](../BlenderTools/blender-4.0.2-windows-x64/dev/) - Blender スクリプト
 - [テスト環境構築ガイド](../../docs/setup/test-environment.md)
 - [Unity アドオン処理フロー](../../docs/unity-addon/overview.md)
 
