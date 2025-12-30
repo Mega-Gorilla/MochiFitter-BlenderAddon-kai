@@ -13470,7 +13470,7 @@ def create_vertex_neighbors_array(obj, expand_distance=0.05, sigma=0.02):
         # 範囲内の頂点を検索
         for idx in kdtree.query_ball_point(vert_world, expand_distance):
             if idx != vert_idx:
-                dist = (world_coords[idx] - vert_world).length
+                dist = np.linalg.norm(world_coords[idx] - vert_world)
                 weight_factor = gaussian(dist, sigma)
                 neighbors_list[vert_idx].append((idx, weight_factor))
     
@@ -13588,7 +13588,7 @@ def create_vertex_neighbors_list(obj, expand_distance=0.05, sigma=0.02):
         # 範囲内の頂点を検索
         for idx in kdtree.query_ball_point(vert_world, expand_distance):
             if idx != vert_idx:
-                dist = (world_coords[idx] - vert_world).length
+                dist = np.linalg.norm(world_coords[idx] - vert_world)
                 weight_factor = gaussian(dist, sigma)
                 vert_neighbors[vert_idx].append((idx, weight_factor))
     
