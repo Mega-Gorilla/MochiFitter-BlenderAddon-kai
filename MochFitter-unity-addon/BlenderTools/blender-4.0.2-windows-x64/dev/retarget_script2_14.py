@@ -6082,7 +6082,8 @@ def inverse_bone_deform_all_vertices(armature_obj, mesh_obj):
     
     # 各頂点に対して逆変換を適用
     for vertex_index in range(len(vertices)):
-        pos = vertices[vertex_index]
+        # numpy配列をVectorに変換（Matrix乗算のため）
+        pos = Vector(vertices[vertex_index])
         
         # 頂点のボーンウェイトを取得
         weights = get_vertex_groups_and_weights(mesh_obj, vertex_index)
@@ -6145,7 +6146,8 @@ def inverse_bone_deform_all_vertices(armature_obj, mesh_obj):
         for shape_key in mesh_obj.data.shape_keys.key_blocks:
             if shape_key.name != "Basis":
                 for i, vert in enumerate(shape_key.data):
-                    vert.co += inverse_transformed_vertices[i] - vertices[i]
+                    # numpy配列をVectorに変換して減算（型の整合性）
+                    vert.co += inverse_transformed_vertices[i] - Vector(vertices[i])
         basis_shape_key = mesh_obj.data.shape_keys.key_blocks["Basis"]
         for i, vert in enumerate(basis_shape_key.data):
             vert.co = inverse_transformed_vertices[i]
