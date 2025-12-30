@@ -333,10 +333,9 @@ def get_cached_kdtree(coords: np.ndarray, cache_key: str = None,
 
     # キャッシュキーの生成
     if cache_key is None:
-        # 座標配列のハッシュを使用（形状 + 最初/最後/中央のサンプル）
-        shape_key = f"{coords.shape}"
-        sample_key = f"{coords[0].tobytes()}{coords[-1].tobytes()}{coords[len(coords)//2].tobytes()}"
-        cache_key = f"kdtree_{shape_key}_{hash(sample_key)}"
+        # 全座標のハッシュを使用（安全性重視：座標が1つでも変われば異なるキー）
+        # コスト: ~0.16ms for 25k vertices（KDTree構築の10-50msに比べて無視できる）
+        cache_key = f"kdtree_{hash(coords.tobytes())}"
 
     # キャッシュから取得または新規構築
     if cache_key in _context.kdtree_cache:

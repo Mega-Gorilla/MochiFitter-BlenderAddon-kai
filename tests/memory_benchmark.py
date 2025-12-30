@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
 """
-Memory benchmark for retarget_script optimization.
+Memory benchmark for retarget_script optimization (Direct Blender execution).
 
 Measures memory usage during retarget processing to understand the
 impact of KDTree caching (P1-1) on memory consumption.
 
+NOTE: This script contains hardcoded paths specific to the development environment.
+For portable usage, use memory_benchmark_v2.py which uses run_retarget.py wrapper.
+
+Required Environment:
+    - Blender installed at MochFitter-unity-addon/BlenderTools/blender-4.0.2-windows-x64/
+    - Test data files in MochFitter-unity-addon/OutfitRetargetingSystem/Editor/
+    - Or set BLENDER_PATH environment variable
+
 Usage:
     python memory_benchmark.py [--iterations N]
+
+Alternative (Recommended):
+    python memory_benchmark_v2.py
 """
 
 import subprocess
