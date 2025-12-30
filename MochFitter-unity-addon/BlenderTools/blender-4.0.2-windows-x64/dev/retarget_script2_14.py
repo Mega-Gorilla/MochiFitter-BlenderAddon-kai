@@ -44,17 +44,15 @@ import hashlib
 # =============================================================================
 # Optional: Numba JIT (P1-2)
 # =============================================================================
-# Numba はオプション依存。インストールされていない場合はフォールバック実装を使用
+# Numba はオプション依存。インストールされていない場合はNumPyベクトル化にフォールバック
 NUMBA_AVAILABLE = False
 try:
     from numba import jit
     NUMBA_AVAILABLE = True
 except ImportError:
-    # Numba 未インストール時のダミーデコレータ
-    def jit(*args, **kwargs):
-        def decorator(func):
-            return func
-        return decorator
+    # Numba 未導入時は NUMBA_AVAILABLE=False のまま
+    # 距離計算関数は NumPy ベクトル化版にフォールバック（性能回帰なし）
+    pass
 
 # =============================================================================
 # Constants
@@ -371,70 +369,102 @@ def get_cached_kdtree(coords: np.ndarray, cache_key: str = None,
 # Performance Optimization Helpers (P1-2: Numba JIT Distance Calculation)
 # =============================================================================
 
-@jit(nopython=True, fastmath=True)
-def compute_distance_single(p1: np.ndarray, p2: np.ndarray) -> float:
-    """
-    2点間の距離を計算（Numba JIT版）
+if NUMBA_AVAILABLE:
+    # Numba JIT版: ループベースだが JIT コンパイルで高速化
+    @jit(nopython=True, fastmath=True)
+    def compute_distance_single(p1: np.ndarray, p2: np.ndarray) -> float:
+        """
+        2点間の距離を計算（Numba JIT版）
 
-    Parameters:
-        p1: 点1の座標 (3,)
-        p2: 点2の座標 (3,)
+        Parameters:
+            p1: 点1の座標 (3,)
+            p2: 点2の座標 (3,)
 
-    Returns:
-        float: 2点間のユークリッド距離
-    """
-    dist = 0.0
-    for k in range(3):
-        d = p1[k] - p2[k]
-        dist += d * d
-    return np.sqrt(dist)
-
-
-@jit(nopython=True, fastmath=True)
-def compute_distances_batch(center: np.ndarray, neighbor_coords: np.ndarray) -> np.ndarray:
-    """
-    1点から複数点への距離を一括計算（Numba JIT版）
-
-    スムージング処理での距離計算を高速化。
-    np.linalg.norm() の代替として使用。
-
-    Parameters:
-        center: 中心点の座標 (3,)
-        neighbor_coords: 近傍点の座標配列 (N, 3)
-
-    Returns:
-        np.ndarray: 各近傍点への距離 (N,)
-
-    Note:
-        Numba 未インストール時は通常のPython実装として動作（フォールバック）
-        Numba インストール時は JIT コンパイルにより 20-30% 高速化
-    """
-    n = len(neighbor_coords)
-    distances = np.empty(n, dtype=np.float64)
-
-    for j in range(n):
+        Returns:
+            float: 2点間のユークリッド距離
+        """
         dist = 0.0
         for k in range(3):
-            d = center[k] - neighbor_coords[j, k]
+            d = p1[k] - p2[k]
             dist += d * d
-        distances[j] = np.sqrt(dist)
+        return np.sqrt(dist)
 
-    return distances
+    @jit(nopython=True, fastmath=True)
+    def compute_distances_batch(center: np.ndarray, neighbor_coords: np.ndarray) -> np.ndarray:
+        """
+        1点から複数点への距離を一括計算（Numba JIT版）
 
+        Parameters:
+            center: 中心点の座標 (3,)
+            neighbor_coords: 近傍点の座標配列 (N, 3)
 
-@jit(nopython=True, fastmath=True)
-def compute_gaussian_weights(distances: np.ndarray, sigma: float) -> np.ndarray:
-    """
-    ガウシアン重み計算（Numba JIT版）
+        Returns:
+            np.ndarray: 各近傍点への距離 (N,)
+        """
+        n = len(neighbor_coords)
+        distances = np.empty(n, dtype=np.float64)
+        for j in range(n):
+            dist = 0.0
+            for k in range(3):
+                d = center[k] - neighbor_coords[j, k]
+                dist += d * d
+            distances[j] = np.sqrt(dist)
+        return distances
 
-    Parameters:
-        distances: 距離配列 (N,)
-        sigma: ガウス関数の標準偏差
+    @jit(nopython=True, fastmath=True)
+    def compute_gaussian_weights(distances: np.ndarray, sigma: float) -> np.ndarray:
+        """
+        ガウシアン重み計算（Numba JIT版）
 
-    Returns:
-        np.ndarray: ガウシアン重み (N,)
-    """
-    return np.exp(-(distances ** 2) / (2 * sigma ** 2))
+        Parameters:
+            distances: 距離配列 (N,)
+            sigma: ガウス関数の標準偏差
+
+        Returns:
+            np.ndarray: ガウシアン重み (N,)
+        """
+        return np.exp(-(distances ** 2) / (2 * sigma ** 2))
+
+else:
+    # NumPy版: Numba未導入時はベクトル化演算にフォールバック
+    def compute_distance_single(p1: np.ndarray, p2: np.ndarray) -> float:
+        """
+        2点間の距離を計算（NumPy版フォールバック）
+
+        Parameters:
+            p1: 点1の座標 (3,)
+            p2: 点2の座標 (3,)
+
+        Returns:
+            float: 2点間のユークリッド距離
+        """
+        return float(np.linalg.norm(p1 - p2))
+
+    def compute_distances_batch(center: np.ndarray, neighbor_coords: np.ndarray) -> np.ndarray:
+        """
+        1点から複数点への距離を一括計算（NumPy版フォールバック）
+
+        Parameters:
+            center: 中心点の座標 (3,)
+            neighbor_coords: 近傍点の座標配列 (N, 3)
+
+        Returns:
+            np.ndarray: 各近傍点への距離 (N,)
+        """
+        return np.linalg.norm(neighbor_coords - center, axis=1)
+
+    def compute_gaussian_weights(distances: np.ndarray, sigma: float) -> np.ndarray:
+        """
+        ガウシアン重み計算（NumPy版フォールバック）
+
+        Parameters:
+            distances: 距離配列 (N,)
+            sigma: ガウス関数の標準偏差
+
+        Returns:
+            np.ndarray: ガウシアン重み (N,)
+        """
+        return np.exp(-(distances ** 2) / (2 * sigma ** 2))
 
 
 def get_shallowest_bone(armature: bpy.types.Object, avatar_data: dict = None) -> str:
