@@ -19557,6 +19557,7 @@ def process_mesh_in_cycle1(
                 # generatedシェイプキーを削除
                 obj.shape_key_remove(generated_key)
                 print(f"Removed generated shape key: {generated_name} from {obj.name}")
+                obj.data.update()  # シェイプキー削除後のメッシュデータ整合性を確保
 
     print(f"  {obj.name}の処理: {time.time() - obj_start:.2f}秒")
 
@@ -19931,11 +19932,17 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
         cycle1_end = time.time()
         print(f"サイクル1全体: {cycle1_end - cycle1_start:.2f}秒")
 
+        # Cycle1完了後、依存グラフを更新して evaluated_get() が正しいデータを返すことを保証
+        bpy.context.view_layer.update()
+
         for obj in clothing_meshes:
             if obj.data.shape_keys:
                 for key_block in obj.data.shape_keys.key_blocks:
                     print(f"Shape key: {key_block.name} / {key_block.value} found on {obj.name}")
-        
+
+        # duplicate_mesh_with_partial_weights 呼び出し前に依存グラフを再更新
+        bpy.context.view_layer.update()
+
         right_base_mesh, left_base_mesh = duplicate_mesh_with_partial_weights(base_mesh, base_avatar_data)
         duplicate_time = time.time()
         print(f"ベースメッシュ複製: {duplicate_time - cycle1_end:.2f}秒")
