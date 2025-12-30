@@ -28,6 +28,7 @@ import sys
 import re
 import subprocess
 import tempfile
+from dataclasses import dataclass, field
 from mathutils import Matrix, Vector, Euler
 from mathutils.kdtree import KDTree
 from typing import Dict, Optional, Tuple, Set, List, Any
@@ -54,17 +55,122 @@ BLEND_VALUE_EPSILON = 0.00001       # BlendShape値の許容誤差
 # Global State
 # =============================================================================
 
-# グローバルキャッシュ辞書を追加
-_mesh_cache = {}
 
-# グローバル変数：ポーズ状態管理
+@dataclass
+class RetargetContext:
+    """
+    リターゲット処理のコンテキスト（状態管理）
+
+    グローバル変数を置き換え、テスト容易性を向上させる。
+    Phase 3.1 で導入。
+
+    Attributes:
+        mesh_cache: BMesh オブジェクトのキャッシュ
+        deformation_field_cache: Deformation Field データとKDTreeのキャッシュ
+        saved_pose_state: 保存されたポーズ状態
+        previous_pose_state: 前回のポーズ状態
+        armature_record_data: アーマチュアのレコードデータ
+        unity_script_directory: Unity スクリプトディレクトリへのパス
+        is_A_pose: A-poseフラグ
+    """
+
+    # Caches
+    mesh_cache: Dict[str, Any] = field(default_factory=dict)
+    deformation_field_cache: Dict[str, Any] = field(default_factory=dict)
+
+    # Pose State
+    saved_pose_state: Optional[Dict] = None
+    previous_pose_state: Optional[Dict] = None
+
+    # Armature Data
+    armature_record_data: Dict[str, Any] = field(default_factory=dict)
+
+    # Configuration
+    unity_script_directory: Optional[str] = None
+    is_A_pose: bool = False
+
+    def clear_mesh_cache(self) -> None:
+        """メッシュキャッシュをクリアし、BMesh を解放"""
+        for cache_data in self.mesh_cache.values():
+            if isinstance(cache_data, dict) and 'bmesh' in cache_data:
+                try:
+                    cache_data['bmesh'].free()
+                except Exception:
+                    pass  # 既に解放済みの場合は無視
+        self.mesh_cache.clear()
+        print("[RetargetContext] Mesh cache cleared")
+
+    def clear_deformation_cache(self) -> None:
+        """変形フィールドキャッシュをクリア"""
+        self.deformation_field_cache.clear()
+        print("[RetargetContext] Deformation field cache cleared")
+
+    def clear_all_caches(self) -> None:
+        """
+        全キャッシュをクリアし、メモリを解放する。
+
+        チェーン処理（複数の config ペアを連続処理する場合）において、
+        ペア間でこのメソッドを呼び出すことで、メモリ蓄積によるOOMクラッシュを防止する。
+        """
+        cache_stats = []
+
+        # メッシュキャッシュのクリア
+        if self.mesh_cache:
+            cache_stats.append(f"mesh_cache: {len(self.mesh_cache)} entries")
+            self.clear_mesh_cache()
+
+        # Deformation Field キャッシュのクリア
+        if self.deformation_field_cache:
+            cache_stats.append(f"deformation_field_cache: {len(self.deformation_field_cache)} entries")
+            self.clear_deformation_cache()
+
+        # ポーズ状態のクリア
+        if self.saved_pose_state is not None:
+            cache_stats.append("saved_pose_state: cleared")
+            self.saved_pose_state = None
+        if self.previous_pose_state is not None:
+            cache_stats.append("previous_pose_state: cleared")
+            self.previous_pose_state = None
+
+        # アーマチュアレコードデータのクリア
+        if self.armature_record_data:
+            cache_stats.append(f"armature_record_data: {len(self.armature_record_data)} entries")
+            self.armature_record_data.clear()
+
+        # Blender のオーファンデータを削除
+        try:
+            orphans_removed = bpy.data.orphans_purge(do_recursive=True)
+            if orphans_removed > 0:
+                cache_stats.append(f"blender_orphans: {orphans_removed} removed")
+        except Exception as e:
+            print(f"[RetargetContext] Warning: orphans_purge failed: {e}")
+
+        # ガベージコレクション
+        gc.collect()
+
+        if cache_stats:
+            print(f"[RetargetContext] Cleared caches: {', '.join(cache_stats)}")
+        else:
+            print("[RetargetContext] No caches to clear")
+
+
+# =============================================================================
+# Global Instance & Backward Compatibility Aliases
+# =============================================================================
+
+# グローバルコンテキストインスタンス
+_context = RetargetContext()
+
+# 後方互換性のためのエイリアス（既存コードからの参照を維持）
+# TODO: 段階的に関数内のグローバル変数参照を _context に置換後、削除
+_mesh_cache = _context.mesh_cache
+_deformation_field_cache = _context.deformation_field_cache
+
+# ポーズ状態管理（値型のためエイリアスではなく参照として維持）
 _saved_pose_state = None
 _previous_pose_state = None
-
 _is_A_pose = False
-
 _armature_record_data = {}
-
 _unity_script_directory = None
 
 
@@ -75,64 +181,21 @@ def clear_all_caches():
     チェーン処理（複数の config ペアを連続処理する場合）において、
     ペア間でこの関数を呼び出すことで、メモリ蓄積によるOOMクラッシュを防止する。
 
-    クリア対象:
-    - _mesh_cache: メッシュキャッシュ
-    - _saved_pose_state: 保存されたポーズ状態
-    - _previous_pose_state: 前回のポーズ状態
-    - _armature_record_data: アーマチュアレコードデータ
-    - _deformation_field_cache: Deformation Field キャッシュ（NPZデータ、KDTree）
+    Note:
+        Phase 3.1 以降: _context.clear_all_caches() に委譲。
+        グローバル変数（値型）の互換性維持のため、この関数は残す。
     """
-    global _mesh_cache, _saved_pose_state, _previous_pose_state, _armature_record_data
-    global _deformation_field_cache
+    global _saved_pose_state, _previous_pose_state, _armature_record_data
 
-    cache_stats = []
+    # RetargetContext インスタンスのキャッシュをクリア
+    # （_mesh_cache と _deformation_field_cache は _context のエイリアス）
+    _context.clear_all_caches()
 
-    # _mesh_cache のクリア（BMesh を適切に解放）
-    if _mesh_cache:
-        cache_stats.append(f"_mesh_cache: {len(_mesh_cache)} entries")
-        # BMesh.free() を確実に実行してからクリア
-        # 注: clear_mesh_cache() は後方で定義されているためここでは直接実装
-        for cache_data in _mesh_cache.values():
-            if 'bmesh' in cache_data and cache_data['bmesh']:
-                try:
-                    cache_data['bmesh'].free()
-                except Exception:
-                    pass  # 既に解放済みの場合は無視
-        _mesh_cache.clear()
-
-    # ポーズ状態のクリア
-    if _saved_pose_state is not None:
-        cache_stats.append("_saved_pose_state: cleared")
-        _saved_pose_state = None
-    if _previous_pose_state is not None:
-        cache_stats.append("_previous_pose_state: cleared")
-        _previous_pose_state = None
-
-    # アーマチュアレコードデータのクリア
-    if _armature_record_data:
-        cache_stats.append(f"_armature_record_data: {len(_armature_record_data)} entries")
-        _armature_record_data.clear()
-
-    # Deformation Field キャッシュのクリア（最も大きなメモリ消費源）
-    if _deformation_field_cache:
-        cache_stats.append(f"_deformation_field_cache: {len(_deformation_field_cache)} entries")
-        _deformation_field_cache.clear()
-
-    # Blender の孤立データを解放
-    try:
-        orphans_removed = bpy.data.orphans_purge(do_recursive=True)
-        if orphans_removed > 0:
-            cache_stats.append(f"blender_orphans: {orphans_removed} removed")
-    except Exception as e:
-        print(f"[Memory] Warning: orphans_purge failed: {e}")
-
-    # ガベージコレクションを強制実行
-    gc.collect()
-
-    if cache_stats:
-        print(f"[Memory] Cleared caches: {', '.join(cache_stats)}")
-    else:
-        print("[Memory] No caches to clear")
+    # グローバル変数（値型）のクリア
+    # Note: これらは _context のプロパティとは別にグローバルスコープで維持されている
+    _saved_pose_state = None
+    _previous_pose_state = None
+    _armature_record_data.clear()
 
 
 def safe_remove_object(obj_name: str) -> bool:
@@ -6886,8 +6949,9 @@ def subdivide_faces(obj, face_indices, cuts=1, max_distance=0.005):
         mesh.normals_split_custom_set(new_loop_normals)
         mesh.update()
 
-# ① Deformation Field のキャッシュ用グローバル辞書とヘルパー関数
-_deformation_field_cache = {}
+# ① Deformation Field のキャッシュ用ヘルパー関数
+# Note: _deformation_field_cache は _context.deformation_field_cache へのエイリアスとして
+#       ファイル先頭の Global Instance セクションで定義済み
 
 def get_deformation_field(field_data_path: str) -> dict:
     """

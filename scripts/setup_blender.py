@@ -5,8 +5,9 @@ setup_blender.py - Blender自動セットアップスクリプト
 ローカル開発環境でのBlenderバージョン管理・互換性テストを容易にします。
 
 使用例:
-    python scripts/setup_blender.py                    # デフォルト (4.0.2) をインストール
+    python scripts/setup_blender.py                    # デフォルト (4.0.2) + アドオンをインストール
     python scripts/setup_blender.py --version 4.2.0    # 特定バージョンをインストール
+    python scripts/setup_blender.py --no-addons        # アドオンなしでインストール
     python scripts/setup_blender.py --list-versions    # 利用可能バージョン一覧
     python scripts/setup_blender.py --clean            # キャッシュ削除
 
@@ -56,6 +57,19 @@ SUPPORTED_VERSIONS = [
 
 # ダウンロードURLベース
 BLENDER_DOWNLOAD_BASE = "https://download.blender.org/release"
+
+# 必須アドオン（E2Eテストに必要）
+# Note: robust-weight-transfer は もちふぃった～ Unity パッケージに同梱されています。
+#       GitHubバージョンには deps/ (igl) が含まれていないため動作しません。
+REQUIRED_ADDONS = {
+    "robust-weight-transfer": {
+        "description": "Robust Weight Transfer (GPL v3)",
+        "source_hint": "MochiFitter Unity package: BlenderTools/.../addons/robust-weight-transfer/",
+    },
+}
+
+# 必須Pythonパッケージ（E2Eテストに必要）
+REQUIRED_PACKAGES = ["scipy", "numpy"]
 
 
 # =============================================================================
@@ -157,6 +171,48 @@ def get_blender_executable(install_dir: Path) -> Path:
         return install_dir / "Blender.app" / "Contents" / "MacOS" / "Blender"
     else:
         raise RuntimeError(f"Unsupported platform: {platform_name}")
+
+
+def get_addons_dir(install_dir: Path, version: str) -> Path:
+    """
+    Blenderアドオンディレクトリのパスを取得する。
+
+    Args:
+        install_dir: Blenderインストール先ディレクトリ
+        version: Blenderバージョン (例: "4.0.2")
+
+    Returns:
+        Path: アドオンディレクトリのパス
+    """
+    platform_name, _, _ = get_platform_info()
+    major_minor = ".".join(version.split(".")[:2])  # "4.0.2" -> "4.0"
+
+    if platform_name == "macos":
+        return install_dir / "Blender.app" / "Contents" / "Resources" / major_minor / "scripts" / "addons"
+    else:
+        return install_dir / major_minor / "scripts" / "addons"
+
+
+def get_blender_python(install_dir: Path, version: str) -> Path:
+    """
+    BlenderのPython実行ファイルのパスを取得する。
+
+    Args:
+        install_dir: Blenderインストール先ディレクトリ
+        version: Blenderバージョン
+
+    Returns:
+        Path: Python実行ファイルのパス
+    """
+    platform_name, _, _ = get_platform_info()
+    major_minor = ".".join(version.split(".")[:2])
+
+    if platform_name == "windows":
+        return install_dir / major_minor / "python" / "bin" / "python.exe"
+    elif platform_name == "macos":
+        return install_dir / "Blender.app" / "Contents" / "Resources" / major_minor / "python" / "bin" / "python3.10"
+    else:  # linux
+        return install_dir / major_minor / "python" / "bin" / "python3.10"
 
 
 # =============================================================================
@@ -287,13 +343,14 @@ def extract_dmg(archive_path: Path, extract_dir: Path) -> Path:
 # Main Operations
 # =============================================================================
 
-def install_blender(version: str, force: bool = False) -> Path:
+def install_blender(version: str, force: bool = False, install_addons: bool = True) -> Path:
     """
     指定バージョンのBlenderをインストールする。
 
     Args:
         version: Blenderバージョン
         force: 既存インストールを上書きするか
+        install_addons: アドオンとPythonパッケージをインストールするか
 
     Returns:
         Path: インストールされたBlender実行ファイルのパス
@@ -305,7 +362,13 @@ def install_blender(version: str, force: bool = False) -> Path:
     if executable.exists() and not force:
         print(f"Blender {version} is already installed at: {install_dir}")
         print(f"  Executable: {executable}")
-        print("  Use --force to reinstall.")
+
+        # アドオンのチェックとPythonパッケージは既存インストールにも適用
+        if install_addons:
+            check_required_addons(install_dir, version)
+            install_python_packages(install_dir, version)
+
+        print("  Use --force to reinstall Blender itself.")
         return executable
 
     # BlenderToolsディレクトリを作成
@@ -360,14 +423,20 @@ def install_blender(version: str, force: bool = False) -> Path:
     if not executable.exists():
         raise RuntimeError(f"Installation failed: executable not found at {executable}")
 
+    # アドオンのチェックとPythonパッケージのインストール
+    if install_addons:
+        check_required_addons(install_dir, version)
+        install_python_packages(install_dir, version)
+
     print()
     print("=" * 60)
     print(f"Blender {version} installed successfully!")
     print(f"  Location: {install_dir}")
     print(f"  Executable: {executable}")
+    if install_addons:
+        print(f"  Python packages: {', '.join(REQUIRED_PACKAGES)}")
     print()
     print("To use this Blender with run_retarget.py:")
-    print(f'  set BLENDER_PATH="{executable}"')
     print("  python run_retarget.py --preset beryl_to_mao")
     print("=" * 60)
 
@@ -439,6 +508,132 @@ def clean_cache() -> None:
 
 
 # =============================================================================
+# Addon & Package Installation
+# =============================================================================
+
+def check_addon(addon_name: str, addon_info: dict, addons_dir: Path) -> bool:
+    """
+    アドオンがインストールされているかチェックする。
+    インストールされていない場合は手動コピーの案内を表示する。
+
+    Args:
+        addon_name: アドオン名
+        addon_info: アドオン情報（description, source_hint）
+        addons_dir: アドオンディレクトリ
+
+    Returns:
+        bool: インストール済みの場合True
+    """
+    addon_dir = addons_dir / addon_name
+
+    # インストール済みかチェック
+    if addon_dir.exists():
+        # deps/ フォルダの存在も確認（igl が必要）
+        deps_dir = addon_dir / "deps"
+        if deps_dir.exists():
+            print(f"  {addon_name}: OK")
+            return True
+        else:
+            print(f"  {addon_name}: WARNING - deps/ folder missing (igl required)")
+            print(f"    Please copy the complete addon from MochiFitter Unity package")
+            return False
+
+    # 未インストール - 手動コピーを案内
+    print(f"  {addon_name}: NOT FOUND")
+    print(f"    Description: {addon_info['description']}")
+    print(f"    ")
+    print(f"    Please manually copy from your MochiFitter Unity package:")
+    print(f"      Source: {addon_info['source_hint']}")
+    print(f"      Dest:   {addon_dir}/")
+    print(f"    ")
+    return False
+
+
+def check_required_addons(install_dir: Path, version: str) -> bool:
+    """
+    必須アドオンがインストールされているかチェックする。
+
+    Args:
+        install_dir: Blenderインストール先ディレクトリ
+        version: Blenderバージョン
+
+    Returns:
+        bool: 全てのアドオンがインストール済みの場合True
+    """
+    addons_dir = get_addons_dir(install_dir, version)
+
+    if not addons_dir.exists():
+        print(f"Warning: Addons directory not found: {addons_dir}")
+        return False
+
+    print()
+    print("Checking required addons...")
+
+    all_ok = True
+    for addon_name, addon_info in REQUIRED_ADDONS.items():
+        if not check_addon(addon_name, addon_info, addons_dir):
+            all_ok = False
+
+    if all_ok:
+        print("All required addons: OK")
+    else:
+        print()
+        print("=" * 60)
+        print("WARNING: Some required addons are missing!")
+        print("E2E tests (run_retarget.py) will not work without them.")
+        print("=" * 60)
+
+    return all_ok
+
+
+def install_python_packages(install_dir: Path, version: str) -> None:
+    """
+    BlenderのPythonに必須パッケージをインストールする。
+
+    Args:
+        install_dir: Blenderインストール先ディレクトリ
+        version: Blenderバージョン
+    """
+    import subprocess
+
+    python_exe = get_blender_python(install_dir, version)
+
+    if not python_exe.exists():
+        print(f"Warning: Blender Python not found: {python_exe}")
+        return
+
+    print()
+    print("Installing Python packages...")
+
+    # site-packages ディレクトリを取得
+    major_minor = ".".join(version.split(".")[:2])
+    platform_name, _, _ = get_platform_info()
+
+    if platform_name == "macos":
+        site_packages = install_dir / "Blender.app" / "Contents" / "Resources" / major_minor / "python" / "lib" / "python3.10" / "site-packages"
+    else:
+        site_packages = install_dir / major_minor / "python" / "lib" / "site-packages"
+
+    for package in REQUIRED_PACKAGES:
+        print(f"  {package}: Installing...")
+        try:
+            result = subprocess.run(
+                [str(python_exe), "-m", "pip", "install", package, "--target", str(site_packages), "--quiet"],
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+            if result.returncode == 0:
+                print(f"  {package}: Installed")
+            else:
+                print(f"  {package}: Failed - {result.stderr[:200]}")
+        except subprocess.TimeoutExpired:
+            print(f"  {package}: Timeout")
+        except Exception as e:
+            print(f"  {package}: Error - {e}")
+
+
+# =============================================================================
 # CLI
 # =============================================================================
 
@@ -449,14 +644,18 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 使用例:
-  python {Path(__file__).name}                      デフォルト ({DEFAULT_VERSION}) をインストール
+  python {Path(__file__).name}                      デフォルト ({DEFAULT_VERSION}) + アドオンをインストール
   python {Path(__file__).name} --version 4.2.0      特定バージョンをインストール
+  python {Path(__file__).name} --no-addons          アドオンなしでインストール
   python {Path(__file__).name} --list-versions      利用可能バージョン一覧
   python {Path(__file__).name} --list-installed     インストール済み一覧
   python {Path(__file__).name} --clean              全てのインストールを削除
 
 配置先:
   {BLENDER_TOOLS_DIR}/
+
+必須アドオン (手動コピーが必要):
+  - robust-weight-transfer: もちふぃった～ Unity パッケージから手動コピーが必要
         """
     )
 
@@ -470,6 +669,11 @@ def main() -> int:
         "--force", "-f",
         action="store_true",
         help="既存インストールを上書き"
+    )
+    parser.add_argument(
+        "--no-addons",
+        action="store_true",
+        help="アドオンとPythonパッケージをインストールしない"
     )
     parser.add_argument(
         "--list-versions", "-l",
@@ -509,7 +713,11 @@ def main() -> int:
             return 1
 
         # インストール実行
-        install_blender(args.version, force=args.force)
+        install_blender(
+            args.version,
+            force=args.force,
+            install_addons=not args.no_addons
+        )
         return 0
 
     except Exception as e:
