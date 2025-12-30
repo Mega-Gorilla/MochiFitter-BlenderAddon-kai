@@ -316,6 +316,51 @@ def incremental_weight_update(changed_vertices, bvh_tree, ...):
 
 ---
 
+## 3.4 Phase 1 最適化ベンチマーク結果（2025-12-30 実測）
+
+`tests/optimization_benchmark.py` を使用して実測したベンチマーク結果。
+
+### テスト環境
+
+- データ: `deformation_beryl_to_template.npz` から抽出した実頂点データ
+- Python: Blender 4.0.2 付属 Python 3.11
+- Numba: 0.61.0（pip install で追加）
+
+### 10,000 頂点
+
+| 最適化 | 処理時間 | Speedup | MSE | Max Error |
+|--------|----------|---------|-----|-----------|
+| Baseline | 481.68 ms | - | - | - |
+| P1-1: Numba JIT | 370.12 ms | **1.30x** | 7.26e-15 | 4.77e-07 |
+| P1-2: query_ball_tree | 360.92 ms | **1.33x** | 1.09e-14 | 5.96e-07 |
+| P1-3: KDTree rebuild (3回) | 1418.06 ms | - | - | - |
+| P1-3: KDTree shared (3回) | 853.16 ms | **1.66x** | - | - |
+
+### 30,000 頂点
+
+| 最適化 | 処理時間 | Speedup | MSE | Max Error |
+|--------|----------|---------|-----|-----------|
+| Baseline | 2273.79 ms | - | - | - |
+| P1-1: Numba JIT | 1836.99 ms | **1.24x** | 1.71e-14 | 8.94e-07 |
+| P1-2: query_ball_tree | 2195.88 ms | **1.04x** | 2.47e-14 | 1.13e-06 |
+| P1-3: KDTree rebuild (3回) | 6727.60 ms | - | - | - |
+| P1-3: KDTree shared (3回) | 4681.66 ms | **1.44x** | - | - |
+
+### 考察
+
+1. **P1-1 (Numba JIT)**: 安定して **20-30% 高速化**。距離計算のJITコンパイルが効果的。
+2. **P1-2 (query_ball_tree)**: 小規模データでは効果的だが、**大規模データでは効果が薄れる**（一括取得のオーバーヘッド）。
+3. **P1-3 (KDTree caching)**: 複数イテレーションで **44-66% 高速化**。イテレーション数が多いほど効果大。
+4. **精度**: MSE は 10^-14 〜 10^-15 レベルで、**実質的に精度劣化なし**。
+
+### 推奨実装優先順位
+
+1. **P1-3 (KDTree caching)**: 最も効果が高く、実装リスクが低い
+2. **P1-1 (Numba JIT)**: 安定した効果、ただしオプション依存として実装
+3. **P1-2 (query_ball_tree)**: 小規模メッシュ向けにのみ採用を検討
+
+---
+
 ## 4. 実装ロードマップ
 
 ### 4.1 スケジュール
@@ -544,3 +589,4 @@ blender --background --python retarget_script2_14.py -- \
 | 2025-12-30 | 1.0 | 初版作成 |
 | 2025-12-30 | 1.1 | PR #49 レビュー対応: ベンチマーク表追加、compute_distances修正、psutil依存追記、ベンチマーク手順修正 |
 | 2025-12-30 | 1.2 | Numba互換性調査結果追加、BMesh並列処理制約、foreach_get前提条件を明記 |
+| 2025-12-30 | 1.3 | Phase 1 最適化ベンチマーク実測結果追加（10k/30k頂点、Numba JIT、query_ball_tree、KDTree caching）|
