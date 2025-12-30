@@ -111,6 +111,8 @@ profile_data/*
 # baseline_data はローカル回帰テスト用（FBX等の大きなファイルを含む）
 tests/baseline_data/
 tests/optimized_data/
+# ベンチマーク結果（環境依存、再現性低）
+tests/*_results.json
 
 # -------------------------------------------
 # その他
