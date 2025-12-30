@@ -359,7 +359,45 @@ Phase 3 (GPU加速・将来検討):
 | psutil | メモリ/CPU使用量の計測 | オプション（未インストール時は計測スキップ） |
 | (cupy) | GPU加速 | オプション（Phase 3） |
 
-### 5.2 フォールバック戦略
+### 5.2 Numba 互換性調査結果（2025-12-30）
+
+#### 5.2.1 Blender 4.0.2 環境との互換性
+
+| 項目 | Blender 4.0.2 | Numba 0.61.0 要件 | 互換性 |
+|------|---------------|-------------------|--------|
+| Python | 3.11 | 3.10 - 3.13 | ✅ |
+| NumPy | 1.24.3 | 1.24 - 2.1 | ✅ |
+
+**結論: Blender 4.0.2 環境では Numba との互換性あり**
+
+#### 5.2.2 インストール方法
+
+pip wheel に LLVM がバンドルされているため、システム LLVM のインストールは不要:
+
+```bash
+# Blender付属Pythonへのインストール（Unity アドオン同梱 Blender の場合）
+BlenderTools/blender-4.0.2-windows-x64/4.0/python/bin/python.exe -m pip install numba
+```
+
+#### 5.2.3 過去の問題と現在の状況
+
+| 時期 | Blender | 状況 |
+|------|---------|------|
+| 2022年 | 3.1 | NumPy/Python/Numba の三すくみ問題（解決済み） |
+| 現在 | 4.0.2 | **互換性あり、pip install 可能** |
+| 現在 | 4.2+ | 一部で問題報告あり（原因調査中） |
+
+> **参考資料:**
+> - [Numba Installation Documentation](https://numba.readthedocs.io/en/stable/user/installing.html)
+> - [Tissue #132 - Numba/NumPy compatibility](https://github.com/alessandro-zomparelli/tissue/issues/132)
+> - [Blender Artists - Tissue numba issues](https://blenderartists.org/t/tissue-add-on-problem-installing-numba-blender-4-2lts/1605607)
+
+#### 5.2.4 推奨方針
+
+Blender 4.0.2 では互換性が確認されたため、Numba をオプション依存として採用可能。
+ただし、**フォールバック設計は必須**（ユーザー環境差異への対応）。
+
+### 5.3 フォールバック戦略
 
 ```python
 # Numbaが利用できない場合のフォールバック
@@ -382,11 +420,52 @@ def compute_distances(A, B):
     ...
 ```
 
-### 5.3 リスク管理
+### 5.4 BMesh/並列処理の制約
+
+**重要: BMesh はスレッドセーフではありません。**
+
+並列処理を行う場合は、以下の設計パターンを守る必要があります:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ メインスレッド                                                │
+│   ├─ BMesh → NumPy配列に抽出                                │
+│   ├─ ワーカープロセス起動（NumPy配列のみ渡す）                 │
+│   │     └─ NumPy演算のみ（BMesh操作禁止）                    │
+│   └─ NumPy配列 → BMeshに書き戻し                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+`smoothing_processor.py` は既にこの設計に従っています。
+
+### 5.5 foreach_get の活用（前提条件）
+
+Blender API → NumPy 変換は `foreach_get` を使用することで高速化できます:
+
+```python
+# 遅い（Pythonループ）- 避けるべき
+coords = np.array([v.co[:] for v in mesh.vertices])
+
+# 速い（foreach_get）- 10-50倍高速
+coords = np.empty(len(mesh.vertices) * 3, dtype=np.float32)
+mesh.vertices.foreach_get('co', coords)
+coords = coords.reshape(-1, 3)
+
+# 法線も同様
+normals = np.empty(len(mesh.vertices) * 3, dtype=np.float32)
+mesh.vertices.foreach_get('normal', normals)
+normals = normals.reshape(-1, 3)
+```
+
+**Phase 1-2 の最適化は `foreach_get` の使用を前提としています。**
+
+### 5.6 リスク管理
 
 | リスク | 影響度 | 発生確率 | 対策 |
 |--------|--------|---------|------|
-| Numba互換性問題 | 低 | 中 | フォールバック実装 |
+| Numba互換性問題 | 低 | 低〜中 | フォールバック実装 |
+| BMesh並列アクセス | 高 | 中 | メインスレッドでのみBMesh操作 |
+| foreach_get未使用 | 中 | 中 | コードレビューで確認 |
 | メモリ使用量増加 | 中 | 中 | キャッシュサイズ制限 |
 | 精度低下 | 高 | 低 | float64フォールバック |
 | 並列処理デッドロック | 高 | 低 | タイムアウト設定 |
@@ -463,3 +542,5 @@ blender --background --python retarget_script2_14.py -- \
 | 日付 | バージョン | 変更内容 |
 |------|-----------|---------|
 | 2025-12-30 | 1.0 | 初版作成 |
+| 2025-12-30 | 1.1 | PR #49 レビュー対応: ベンチマーク表追加、compute_distances修正、psutil依存追記、ベンチマーク手順修正 |
+| 2025-12-30 | 1.2 | Numba互換性調査結果追加、BMesh並列処理制約、foreach_get前提条件を明記 |
