@@ -115,7 +115,39 @@ def transfer_weights_from_nearest_vertex(base_mesh, target_obj, ...):
 
 ### 3.1 Phase 1: 低リスク・即効性のある改善
 
-#### P1-1: Numba JIT による距離計算高速化
+> **優先順位**: ベンチマーク結果に基づき、効果の高い順に並べ替え済み
+
+#### P1-1: KDTree共有による再構築回避 ★最優先
+
+**対象ファイル:** `smoothing_processor.py`
+
+**現在の実装:**
+```python
+def process_vertex_batch(args):
+    # プロセス内でcKDTreeを構築（毎回）
+    kdtree = cKDTree(vertex_coords)
+```
+
+**最適化後:**
+```python
+# グローバルにKDTreeをキャッシュ
+_kdtree_cache = {}
+
+def get_cached_kdtree(vertex_coords_hash, vertex_coords):
+    if vertex_coords_hash not in _kdtree_cache:
+        _kdtree_cache[vertex_coords_hash] = cKDTree(vertex_coords)
+    return _kdtree_cache[vertex_coords_hash]
+```
+
+**期待効果:** +40-65%（実測: 10k頂点で1.66x、30k頂点で1.44x、3イテレーション時）
+**リスク:** 低（メモリ使用量増加に注意）
+**実装難度:** 低
+
+> **Note**: イテレーション数が多いほど効果大。最も効果が高く実装リスクが低いため、**最優先で実装推奨**。
+
+---
+
+#### P1-2: Numba JIT による距離計算高速化
 
 **対象ファイル:** `smoothing_processor.py`
 
@@ -157,7 +189,7 @@ def compute_distances_from_point(center, neighbor_coords):
 
 ---
 
-#### P1-2: スムージング処理のベクトル化
+#### P1-3: スムージング処理のベクトル化（限定的）
 
 **対象ファイル:** `smoothing_processor.py`
 
@@ -198,37 +230,6 @@ def apply_smoothing_vectorized(vertex_coords, current_weights, smoothing_radius,
 
 > **Note**: 大規模データでは一括取得のオーバーヘッドにより効果が薄れる。
 > 小規模メッシュ（~10k頂点）向けに限定的に採用を検討。
-
----
-
-#### P1-3: KDTree共有による再構築回避
-
-**対象ファイル:** `smoothing_processor.py`
-
-**現在の実装:**
-```python
-def process_vertex_batch(args):
-    # プロセス内でcKDTreeを構築（毎回）
-    kdtree = cKDTree(vertex_coords)
-```
-
-**最適化後:**
-```python
-# グローバルにKDTreeをキャッシュ
-_kdtree_cache = {}
-
-def get_cached_kdtree(vertex_coords_hash, vertex_coords):
-    if vertex_coords_hash not in _kdtree_cache:
-        _kdtree_cache[vertex_coords_hash] = cKDTree(vertex_coords)
-    return _kdtree_cache[vertex_coords_hash]
-```
-
-**期待効果:** +40-65%（実測: 10k頂点で1.66x、30k頂点で1.44x、3イテレーション時）
-**リスク:** 低（メモリ使用量増加に注意）
-
-> **Note**: イテレーション数が多いほど効果大。最も効果が高く実装リスクが低いため、**最優先で実装推奨**。
-
-**実装難度:** 低
 
 ---
 
@@ -361,9 +362,9 @@ def incremental_weight_update(changed_vertices, bvh_tree, ...):
 
 ### 推奨実装優先順位
 
-1. **P1-3 (KDTree caching)**: 最も効果が高く、実装リスクが低い
-2. **P1-1 (Numba JIT)**: 安定した効果、ただしオプション依存として実装
-3. **P1-2 (query_ball_tree)**: 小規模メッシュ向けにのみ採用を検討
+1. **P1-1 (KDTree caching)**: 最も効果が高く（+40-65%）、実装リスクが低い
+2. **P1-2 (Numba JIT)**: 安定した効果（+20-30%）、ただしオプション依存として実装
+3. **P1-3 (query_ball_tree)**: 小規模メッシュ向けに限定的（+0-35%）
 
 ---
 
@@ -373,9 +374,9 @@ def incremental_weight_update(changed_vertices, bvh_tree, ...):
 
 ```
 Phase 1 (低リスク・即効):
-├─ [ ] P1-1: Numba JIT による距離計算高速化
-├─ [ ] P1-2: スムージング処理のベクトル化
-├─ [ ] P1-3: KDTree共有による再構築回避
+├─ [ ] P1-1: KDTree共有による再構築回避 ★最優先 (+40-65%)
+├─ [ ] P1-2: Numba JIT による距離計算高速化 (+20-30%)
+├─ [ ] P1-3: スムージング処理のベクトル化（限定的）(+0-35%)
 └─ [ ] ベンチマーク・回帰テスト
 
 Phase 2 (中リスク・アルゴリズム改善):
@@ -596,4 +597,4 @@ blender --background --python retarget_script2_14.py -- \
 | 2025-12-30 | 1.1 | PR #49 レビュー対応: ベンチマーク表追加、compute_distances修正、psutil依存追記、ベンチマーク手順修正 |
 | 2025-12-30 | 1.2 | Numba互換性調査結果追加、BMesh並列処理制約、foreach_get前提条件を明記 |
 | 2025-12-30 | 1.3 | Phase 1 最適化ベンチマーク実測結果追加（10k/30k頂点、Numba JIT、query_ball_tree、KDTree caching）|
-| 2025-12-30 | 1.4 | 各最適化施策の「期待効果」を実測値に基づいて修正 |
+| 2025-12-30 | 1.4 | 各最適化施策の「期待効果」を実測値に基づいて修正、優先度順に並び替え |
