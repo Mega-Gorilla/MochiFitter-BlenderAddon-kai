@@ -106,6 +106,13 @@ profile_data/*
 !profile_data/README.md
 
 # -------------------------------------------
+# Test Data (Regression Testing)
+# -------------------------------------------
+# baseline_data はローカル回帰テスト用（FBX等の大きなファイルを含む）
+tests/baseline_data/
+tests/optimized_data/
+
+# -------------------------------------------
 # その他
 # -------------------------------------------
 *.log
