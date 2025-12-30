@@ -539,10 +539,10 @@ def incremental_weight_update(changed_vertices, bvh_tree, ...):
 
 ```
 Phase 1 (低リスク・即効):
-├─ [ ] P1-0: foreach_get + NumPy batch ★★★最優先 (+1900-2100%)
+├─ [ ] P1-0: foreach_get + NumPy batch ★★★最優先 (~20x ※ミクロベンチ参考値)
 ├─ [ ] P1-1: KDTree共有による再構築回避 (+40-65%)
 ├─ [ ] P1-2: Numba JIT による距離計算高速化（オプション）(+20-30%)
-├─ [ ] P1-3: スムージング処理のベクトル化（限定的）(+0-35%)
+├─ [ ] P1-3: スムージング処理のベクトル化（条件付き）(+0-35%)
 └─ [ ] ベンチマーク・回帰テスト
 
 Phase 2 (中リスク・アルゴリズム改善):
@@ -561,8 +561,8 @@ Phase 3 (GPU加速・将来検討):
 
 | マイルストーン | 目標時間 | 達成基準 |
 |---------------|---------|---------|
-| M1: Phase 1完了 | - | 287秒 → 180-200秒 |
-| M2: Phase 2完了 | - | → 120-150秒 |
+| M1: Phase 1完了 | - | 287秒 → 150-200秒（保守的見積もり） |
+| M2: Phase 2完了 | - | → 80-120秒 |
 | M3: Phase 3検証 | - | GPU環境での動作確認 |
 
 ---
@@ -675,7 +675,7 @@ mesh.vertices.foreach_get('normal', normals)
 normals = normals.reshape(-1, 3)
 ```
 
-**Phase 1-2 の最適化は `foreach_get` の使用を前提としています。**
+**P1-0 の最適化（`retarget_script2_14.py` 内の Mesh API 使用箇所）は `foreach_get` の使用を前提としています。** `smoothing_processor.py` は既に NumPy 配列で処理しているため、この前提は適用されません。
 
 ### 5.6 リスク管理
 
@@ -766,3 +766,4 @@ blender --background --python retarget_script2_14.py -- \
 | 2025-12-30 | 1.4 | 各最適化施策の「期待効果」を実測値に基づいて修正、優先度順に並び替え |
 | 2025-12-30 | 1.5 | **P1-0: foreach_get + NumPy batch 追加（~20x効果）**、レビュアー意見に基づく再調査、目標時間上方修正 |
 | 2025-12-30 | 1.6 | レビュアー追加指摘対応: BMesh/Mesh API 分類表、配列事前確保パターン、目標時間保守的見直し、query_ball_tree 条件付き運用を明記 |
+| 2025-12-30 | 1.7 | レビュー再確認対応: マイルストーン目標値を 1.2 と統一、P1-0 効果にミクロベンチ参考値注記、foreach_get 前提を retarget_script2_14.py に限定 |
