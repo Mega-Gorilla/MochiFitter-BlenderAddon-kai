@@ -311,15 +311,15 @@ def get_mesh_vertices_world(mesh, matrix) -> np.ndarray:
 # =============================================================================
 
 def get_cached_kdtree(coords: np.ndarray, cache_key: str = None,
-                      balanced_tree: bool = False, compact_nodes: bool = False):
+                      balanced_tree: bool = True, compact_nodes: bool = True):
     """
     KDTree をキャッシュして再構築を回避する（P1-1）
 
     Parameters:
         coords: 頂点座標 (N, 3) の配列
         cache_key: キャッシュキー（None の場合は座標のハッシュを使用）
-        balanced_tree: cKDTree の balanced_tree パラメータ
-        compact_nodes: cKDTree の compact_nodes パラメータ
+        balanced_tree: cKDTree の balanced_tree パラメータ（デフォルト: True）
+        compact_nodes: cKDTree の compact_nodes パラメータ（デフォルト: True）
 
     Returns:
         cKDTree: キャッシュされた、または新規構築された KDTree
@@ -327,6 +327,7 @@ def get_cached_kdtree(coords: np.ndarray, cache_key: str = None,
     Note:
         同一メッシュに対して複数回 KDTree を構築する場合に有効
         10k頂点で約1.66倍、30k頂点で約1.44倍の高速化（3イテレーション時）
+        デフォルトパラメータは cKDTree() のデフォルトに合わせている
     """
     global _context
 
@@ -13510,9 +13511,8 @@ def create_vertex_neighbors_array(obj, expand_distance=0.05, sigma=0.02):
     # 頂点のワールド座標を取得
     world_coords = get_mesh_vertices_world(eval_mesh, eval_obj.matrix_world)
 
-    # KDTreeを構築（P1-1: キャッシュ版）
-    cache_key = f"neighbors_array_{obj.name}_{num_verts}"
-    kdtree = get_cached_kdtree(world_coords, cache_key=cache_key)
+    # KDTreeを構築（P1-1: キャッシュ版、座標ハッシュでキーを自動生成）
+    kdtree = get_cached_kdtree(world_coords)
 
     # ガウス関数
     def gaussian(distance, sigma):
@@ -13629,10 +13629,8 @@ def create_vertex_neighbors_list(obj, expand_distance=0.05, sigma=0.02):
     # 頂点のワールド座標を取得
     world_coords = get_mesh_vertices_world(eval_mesh, eval_obj.matrix_world)
 
-    # KDTreeを構築（P1-1: キャッシュ版）
-    num_verts = len(world_coords)
-    cache_key = f"neighbors_list_{obj.name}_{num_verts}"
-    kdtree = get_cached_kdtree(world_coords, cache_key=cache_key)
+    # KDTreeを構築（P1-1: キャッシュ版、座標ハッシュでキーを自動生成）
+    kdtree = get_cached_kdtree(world_coords)
 
     # ガウス関数
     def gaussian(distance, sigma):
