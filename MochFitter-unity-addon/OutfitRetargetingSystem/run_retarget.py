@@ -27,7 +27,8 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent.resolve()
 EDITOR_DIR = SCRIPT_DIR / "Editor"
 OUTPUTS_DIR = SCRIPT_DIR / "Outputs"
-BLENDER_TOOLS_DIR = SCRIPT_DIR.parent / "BlenderTools" / "blender-4.0.2-windows-x64"
+# BlenderTools/ ディレクトリ（setup_blender.py でインストールしたBlenderが配置される）
+BLENDER_TOOLS_DIR = SCRIPT_DIR.parent / "BlenderTools"
 
 # Preset configurations for common test cases
 PRESETS = {
@@ -51,30 +52,113 @@ PRESETS = {
 }
 
 
+def _get_platform_dir_suffix() -> str:
+    """Get platform-specific directory suffix for Blender installation."""
+    import platform as pf
+    system = pf.system().lower()
+    machine = pf.machine().lower()
+
+    if system == "windows":
+        return "windows-x64"
+    elif system == "linux":
+        return "linux-x64"
+    elif system == "darwin":
+        # macOS: Apple Silicon (arm64) or Intel (x64)
+        if machine in ("arm64", "aarch64"):
+            return "macos-arm64"
+        else:
+            return "macos-x64"
+    else:
+        return "unknown"
+
+
 def find_blender() -> Path:
-    """Find Blender executable."""
+    """Find Blender executable.
+
+    Search order:
+    1. BLENDER_PATH environment variable
+    2. BlenderTools/ directory (setup_blender.py でインストールしたもの)
+    3. Common installation paths (Windows/Linux/macOS)
+    4. PATH
+    """
     import shutil
+    import platform as pf
 
     # Check BLENDER_PATH environment variable first
     env_path = os.environ.get("BLENDER_PATH")
     if env_path and Path(env_path).exists():
         return Path(env_path)
 
-    # Check local BlenderTools
-    local_blender = BLENDER_TOOLS_DIR / "blender.exe"
-    if local_blender.exists():
-        return local_blender
+    # Check BlenderTools/ for setup_blender.py installed versions
+    # 優先順: デフォルトバージョン (4.0.2) > 最新バージョン
+    if BLENDER_TOOLS_DIR.exists():
+        system = pf.system().lower()
+        platform_suffix = _get_platform_dir_suffix()
 
-    # Common installation paths (Windows)
-    common_paths = [
-        Path(r"C:\Program Files\Blender Foundation\Blender 4.0\blender.exe"),
-        Path(r"C:\Program Files\Blender Foundation\Blender 4.1\blender.exe"),
-        Path(r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe"),
-        Path(r"C:\Program Files\Blender Foundation\Blender 4.3\blender.exe"),
-    ]
-    for p in common_paths:
-        if p.exists():
-            return p
+        # プラットフォーム別の実行ファイル名とパターン
+        if system == "windows":
+            exe_name = "blender.exe"
+            pattern = "blender-*-windows-x64"
+        elif system == "linux":
+            exe_name = "blender"
+            pattern = "blender-*-linux-x64"
+        elif system == "darwin":
+            exe_name = "Blender.app/Contents/MacOS/Blender"
+            pattern = "blender-*-macos-*"
+        else:
+            exe_name = "blender"
+            pattern = "blender-*"
+
+        # デフォルトバージョン (4.0.2) を優先的にチェック
+        default_dir = BLENDER_TOOLS_DIR / f"blender-4.0.2-{platform_suffix}"
+        default_exe = default_dir / exe_name
+        if default_exe.exists():
+            return default_exe
+
+        # BlenderTools/ 内の全バージョンをチェック (バージョン番号降順)
+        blender_dirs = sorted(
+            BLENDER_TOOLS_DIR.glob(pattern),
+            key=lambda p: p.name,
+            reverse=True  # 最新バージョン優先
+        )
+        for blender_dir in blender_dirs:
+            exe_path = blender_dir / exe_name
+            if exe_path.exists():
+                return exe_path
+
+    # Common installation paths by platform
+    system = pf.system().lower()
+
+    if system == "windows":
+        common_paths = [
+            Path(r"C:\Program Files\Blender Foundation\Blender 4.0\blender.exe"),
+            Path(r"C:\Program Files\Blender Foundation\Blender 4.1\blender.exe"),
+            Path(r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe"),
+            Path(r"C:\Program Files\Blender Foundation\Blender 4.3\blender.exe"),
+        ]
+        for p in common_paths:
+            if p.exists():
+                return p
+
+    elif system == "linux":
+        linux_paths = [
+            Path("/usr/bin/blender"),
+            Path("/snap/bin/blender"),
+            Path.home() / ".local/bin/blender",
+        ]
+        for p in linux_paths:
+            if p.exists():
+                return p
+
+    elif system == "darwin":
+        # macOS: /Applications/Blender.app
+        macos_paths = [
+            Path("/Applications/Blender.app/Contents/MacOS/Blender"),
+            Path.home() / "Applications/Blender.app/Contents/MacOS/Blender",
+        ]
+        for p in macos_paths:
+            if p.exists():
+                return p
 
     # Check PATH
     blender_path = shutil.which("blender")
@@ -82,7 +166,8 @@ def find_blender() -> Path:
         return Path(blender_path)
 
     raise FileNotFoundError(
-        "Blender not found. Set BLENDER_PATH environment variable or install Blender 4.0+."
+        "Blender not found. Run 'python scripts/setup_blender.py' to install, "
+        "or set BLENDER_PATH environment variable."
     )
 
 
@@ -91,21 +176,30 @@ def find_retarget_script() -> Path:
 
     Search order:
     1. RETARGET_SCRIPT_PATH environment variable
-    2. Local BlenderTools/dev/ directory
+    2. BlenderTools/blender-*/dev/ directory (default 4.0.2 first, platform-aware)
     """
     # Check environment variable first
     env_path = os.environ.get("RETARGET_SCRIPT_PATH")
     if env_path and Path(env_path).exists():
         return Path(env_path)
 
-    # Check local BlenderTools
-    script_path = BLENDER_TOOLS_DIR / "dev" / "retarget_script2_14.py"
-    if script_path.exists():
-        return script_path
+    # Check BlenderTools/blender-*/dev/ directories
+    if BLENDER_TOOLS_DIR.exists():
+        # デフォルトバージョン (4.0.2) を優先（プラットフォーム対応）
+        platform_suffix = _get_platform_dir_suffix()
+        default_script = BLENDER_TOOLS_DIR / f"blender-4.0.2-{platform_suffix}" / "dev" / "retarget_script2_14.py"
+        if default_script.exists():
+            return default_script
+
+        # 他のバージョンを探索
+        for blender_dir in sorted(BLENDER_TOOLS_DIR.glob("blender-*"), reverse=True):
+            script_path = blender_dir / "dev" / "retarget_script2_14.py"
+            if script_path.exists():
+                return script_path
 
     raise FileNotFoundError(
         f"retarget_script2_14.py not found. "
-        f"Set RETARGET_SCRIPT_PATH environment variable or place script at {script_path}"
+        f"Set RETARGET_SCRIPT_PATH environment variable or place script in BlenderTools/blender-*/dev/"
     )
 
 
