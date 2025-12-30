@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Unity アドオン**: RetargetContext クラスを導入（Phase 3.1 リファクタリング）
+  - グローバル変数を dataclass ベースのコンテキストクラスに集約
+  - 後方互換性のためエイリアスを維持
+  - `clear_all_caches()` を `_context.clear_all_caches()` に委譲
+
 ### Fixed
 - **Unity アドオン**: チェーン処理時のメモリ不足クラッシュを修正 (Issue #34)
   - `clear_all_caches()` 関数を追加（全グローバルキャッシュのクリア）
