@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `_deformation_field_cache` (NPZデータ、KDTree) の適切な解放
   - `bpy.data.orphans_purge()` による Blender 孤立データの解放
   - `gc.collect()` によるガベージコレクション強制実行
+- **Unity アドオン**: シェイプキー削除後のデータ整合性を確保 (Issue #46)
+  - `obj.data.update()` を追加（シェイプキー削除後のメッシュデータ同期）
+  - `bpy.context.view_layer.update()` を追加（依存グラフ更新）
+  - `evaluated_get()` が正しいデータを返すことを保証
+  - 参照: [Blender #115572](https://projects.blender.org/blender/blender/issues/115572)
 
 ## [0.2.17] - 2025-12-29
 
