@@ -52,6 +52,26 @@ PRESETS = {
 }
 
 
+def _get_platform_dir_suffix() -> str:
+    """Get platform-specific directory suffix for Blender installation."""
+    import platform as pf
+    system = pf.system().lower()
+    machine = pf.machine().lower()
+
+    if system == "windows":
+        return "windows-x64"
+    elif system == "linux":
+        return "linux-x64"
+    elif system == "darwin":
+        # macOS: Apple Silicon (arm64) or Intel (x64)
+        if machine in ("arm64", "aarch64"):
+            return "macos-arm64"
+        else:
+            return "macos-x64"
+    else:
+        return "unknown"
+
+
 def find_blender() -> Path:
     """Find Blender executable.
 
@@ -73,8 +93,9 @@ def find_blender() -> Path:
     # 優先順: デフォルトバージョン (4.0.2) > 最新バージョン
     if BLENDER_TOOLS_DIR.exists():
         system = pf.system().lower()
+        platform_suffix = _get_platform_dir_suffix()
 
-        # プラットフォーム別の実行ファイル名
+        # プラットフォーム別の実行ファイル名とパターン
         if system == "windows":
             exe_name = "blender.exe"
             pattern = "blender-*-windows-x64"
@@ -89,13 +110,12 @@ def find_blender() -> Path:
             pattern = "blender-*"
 
         # デフォルトバージョン (4.0.2) を優先的にチェック
-        default_dir = BLENDER_TOOLS_DIR / f"blender-4.0.2-{'windows-x64' if system == 'windows' else 'linux-x64' if system == 'linux' else 'macos-arm64'}"
+        default_dir = BLENDER_TOOLS_DIR / f"blender-4.0.2-{platform_suffix}"
         default_exe = default_dir / exe_name
         if default_exe.exists():
             return default_exe
 
         # BlenderTools/ 内の全バージョンをチェック (バージョン番号降順)
-        import glob
         blender_dirs = sorted(
             BLENDER_TOOLS_DIR.glob(pattern),
             key=lambda p: p.name,
@@ -156,7 +176,7 @@ def find_retarget_script() -> Path:
 
     Search order:
     1. RETARGET_SCRIPT_PATH environment variable
-    2. BlenderTools/blender-*/dev/ directory (default 4.0.2 first)
+    2. BlenderTools/blender-*/dev/ directory (default 4.0.2 first, platform-aware)
     """
     # Check environment variable first
     env_path = os.environ.get("RETARGET_SCRIPT_PATH")
@@ -165,8 +185,9 @@ def find_retarget_script() -> Path:
 
     # Check BlenderTools/blender-*/dev/ directories
     if BLENDER_TOOLS_DIR.exists():
-        # デフォルトバージョン (4.0.2) を優先
-        default_script = BLENDER_TOOLS_DIR / "blender-4.0.2-windows-x64" / "dev" / "retarget_script2_14.py"
+        # デフォルトバージョン (4.0.2) を優先（プラットフォーム対応）
+        platform_suffix = _get_platform_dir_suffix()
+        default_script = BLENDER_TOOLS_DIR / f"blender-4.0.2-{platform_suffix}" / "dev" / "retarget_script2_14.py"
         if default_script.exists():
             return default_script
 
