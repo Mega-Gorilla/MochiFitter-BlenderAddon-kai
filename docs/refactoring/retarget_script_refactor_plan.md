@@ -583,7 +583,7 @@ if __name__ == "__main__":
     [x] clear_all_caches() の _context への委譲
     [ ] 段階的な関数の移行（今後のPRで対応）
 
-[x] 3.2 関数の責務分離 (PR #TBD)
+[x] 3.2 関数の責務分離 (PR #45)
     [x] print_config_details() - 設定ファイル内容出力
     [x] clean_mesh_invalid_vertices() - 独立・非有限頂点削除
     [x] apply_sub_bone_overrides() / restore_bone_overrides() - サブボーン上書き
