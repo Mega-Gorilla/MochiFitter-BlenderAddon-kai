@@ -14,13 +14,16 @@ Issue #36 のリファクタリング完了後、次のステップとして処�
 
 | マイルストーン | 現在 | 目標 | 短縮率 |
 |---------------|------|------|--------|
-| Phase 1 完了（P1-0 のみ） | 287秒 | 60-120秒 | 60-80% |
-| Phase 1 完了（全施策） | - | 40-80秒 | 70-85% |
-| Phase 2 完了 | - | 30-60秒 | 80-90% |
-| (Phase 3 GPU) | - | 15-30秒 | 90-95% |
+| Phase 1 完了（保守的） | 287秒 | 150-200秒 | 30-50% |
+| Phase 1 完了（楽観的） | 287秒 | 100-150秒 | 50-65% |
+| Phase 2 完了 | - | 80-120秒 | 60-70% |
+| (Phase 3 GPU) | - | 40-80秒 | 70-85% |
 
-> **Note**: P1-0 (foreach_get + NumPy batch) のベンチマーク結果（~20x）を反映し、目標を上方修正。
-> 実際の効果は処理内容により異なるため、段階的に検証が必要。
+> ⚠️ **注意（レビュアー指摘 2025-12-30）:**
+> - ミクロベンチマーク（~20x）は実処理全体への寄与率と異なる
+> - foreach_get は Mesh API 向けであり、BMesh 箇所（約35箇所）には適用不可
+> - 配列確保コストが支配的になりやすいため、事前確保が必要
+> - **フェーズ別の実測ログで効果を確認してから目標を再評価すること**
 
 ### 1.3 関連Issue/PR
 
@@ -123,59 +126,98 @@ def transfer_weights_from_nearest_vertex(base_mesh, target_obj, ...):
 
 #### P1-0: foreach_get + NumPy batch 一括変換 ★★★最優先
 
-**対象ファイル:** `retarget_script2_14.py`（52箇所以上）
+**対象ファイル:** `retarget_script2_14.py`
 
 **レビュアー指摘により追加**: 頂点ごとのPythonループ内で Vector 生成や行列変換を繰り返している箇所を配列化→一括変換に寄せる。
 
+> ⚠️ **重要な制約（レビュアー指摘 2025-12-30）:**
+> - `foreach_get` は **Mesh API 向け**であり、**BMesh には適用不可**
+> - BMesh で回している箇所は直接置き換えできない
+> - 「Meshで取得→NumPy処理→必要最小限だけBMeshへ戻す」方針が安全
+
+**適用可能箇所の分類:**
+
+| 分類 | 対象 | foreach_get | 箇所数 |
+|------|------|-------------|--------|
+| A: Mesh API | `mesh.vertices`, `evaluated_mesh.vertices` | ✅ 適用可能 | 約50箇所 |
+| B: BMesh | `bm.verts`, `cloth_bm.verts` | ❌ 不可 | 約35箇所 |
+| C: NumPy配列 | すでに NumPy 配列のデータ | - (行列演算のみ) | 約15箇所 |
+
 **現在の実装（遅い）:**
 ```python
-# パターン1: 頂点抽出 + 行列変換（~18-230ms per 10k-100k vertices）
+# パターン1: Mesh API + 行列変換 ← foreach_get 適用可能
 vertices_world = np.array([matrix @ v.co for v in mesh.vertices])
 
-# パターン2: Vector生成 + 行列変換（~25-300ms per 10k-100k vertices）
-transformed = np.array([matrix @ Vector(v) for v in vertices])
+# パターン2: BMesh + 行列変換 ← foreach_get 不可、行列演算のみ最適化
+coords = np.array([v.co for v in bm.verts])
+transformed = np.array([matrix @ Vector(v) for v in coords])
 
-# パターン3: 単純な頂点抽出（~2-25ms per 10k-100k vertices）
-coords = [v.co[:] for v in mesh.vertices]
+# パターン3: NumPy配列 + 行列変換 ← 行列演算のみ最適化
+transformed = np.array([matrix @ Vector(v) for v in vertices])
 ```
 
 **最適化後（高速）:**
 ```python
-# 1. foreach_get で頂点座標を一括抽出（10-15x 高速）
+# パターン1: Mesh API → foreach_get + NumPy batch（10-20x 高速）
 num_verts = len(mesh.vertices)
 coords = np.empty(num_verts * 3, dtype=np.float64)
 mesh.vertices.foreach_get("co", coords)
 coords = coords.reshape(-1, 3)
-
-# 2. NumPy行列演算で一括変換（100-250x 高速）
 rotation = np.array(matrix)[:3, :3]
 translation = np.array(matrix)[:3, 3]
 vertices_world = coords @ rotation.T + translation
+
+# パターン2: BMesh → リスト内包 + NumPy batch（行列演算部分のみ高速化）
+coords = np.array([v.co for v in bm.verts], dtype=np.float64)  # BMeshはリスト内包のまま
+vertices_world = coords @ rotation.T + translation  # 行列演算は一括化
+
+# パターン3: NumPy配列 → NumPy batch のみ（100-250x 高速）
+# 配列の事前確保（繰り返し処理で重要）
+vertices_world = coords @ rotation.T + translation
 ```
 
-**期待効果:** **+1900-2100%（約20倍）**
-- 頂点抽出: 14-16x 高速化
-- 行列変換: 100-250x 高速化
-- 複合処理: **約20x 高速化**
+**配列事前確保パターン（繰り返し処理で重要）:**
+```python
+# 悪い例: 毎回配列を確保
+for i in range(iterations):
+    coords = np.empty(num_verts * 3, dtype=np.float64)  # 毎回確保 ← オーバーヘッド
+    mesh.vertices.foreach_get("co", coords)
+
+# 良い例: 事前確保して再利用
+coords = np.empty(num_verts * 3, dtype=np.float64)  # 1回だけ確保
+result = np.empty((num_verts, 3), dtype=np.float64)  # 結果も事前確保
+for i in range(iterations):
+    mesh.vertices.foreach_get("co", coords)  # 再利用
+    np.dot(coords.reshape(-1, 3), rotation.T, out=result)  # in-place演算
+    result += translation
+```
+
+**期待効果（修正版）:**
+- **Mesh API 箇所（約50箇所）**: 10-20x 高速化
+- **BMesh 箇所（約35箇所）**: 行列演算部分のみ 2-5x 高速化（foreach_get 不可）
+- **全体への寄与率**: 処理内容により異なる（後述の注意参照）
 
 **リスク:** 低（Blender標準API、追加依存なし）
-**実装難度:** 中（適用箇所が多い: 52箇所以上）
+**実装難度:** 中（適用箇所が多い、BMesh/Mesh の区別が必要）
 
-> **ベンチマーク結果（2025-12-30 実測）:**
+> **ベンチマーク結果（2025-12-30 実測）- Mesh API 箇所:**
 > | 頂点数 | 現行パターン | foreach_get + NumPy | **Speedup** |
 > |--------|-------------|---------------------|-------------|
 > | 10,000 | 18.83 ms | 0.91 ms | **20.76x** |
 > | 30,000 | 59.98 ms | 2.79 ms | **21.46x** |
 > | 100,000 | 229.76 ms | 11.76 ms | **19.53x** |
+>
+> ⚠️ **注意**: 上記はミクロベンチマーク。実処理全体での寄与率は別途検証が必要。
 
 **主な適用箇所（retarget_script2_14.py）:**
-| 行番号 | パターン | 優先度 |
-|--------|----------|--------|
-| 882 | `np.array([matrix @ Vector(v) for v in vertices])` | 高 |
-| 1483 | `np.array([matrix @ v.co for v in mesh.vertices])` | 高 |
-| 5439, 6169, 7907 | バッチ処理内のループ | 高 |
-| 5969, 6024, 6059, 6145 | deformation処理内 | 高 |
-| 9921, 12095, 13380 | ウェイト転送関連 | 中 |
+
+| 分類 | 行番号 | パターン | 適用可能 |
+|------|--------|----------|----------|
+| A | 1483 | `[matrix @ v.co for v in mesh.vertices]` | foreach_get ✅ |
+| A | 833, 3858, 5427 | `[v.co for v in eval_mesh.vertices]` | foreach_get ✅ |
+| B | 4242, 16085 | `[v.co for v in cloth_bm.verts]` | 行列演算のみ |
+| B | 16349-16350 | `[v.co for v in cloth_bm.verts]` + normals | 行列演算のみ |
+| C | 882, 5969 | `[matrix @ Vector(v) for v in vertices]` | 行列演算のみ |
 
 ---
 
@@ -251,7 +293,7 @@ def compute_distances_from_point(center, neighbor_coords):
 
 ---
 
-#### P1-3: スムージング処理のベクトル化（限定的）
+#### P1-3: スムージング処理のベクトル化（条件付き採用）
 
 **対象ファイル:** `smoothing_processor.py`
 
@@ -290,8 +332,33 @@ def apply_smoothing_vectorized(vertex_coords, current_weights, smoothing_radius,
 **リスク:** 低
 **実装難度:** 低
 
-> **Note**: 大規模データでは一括取得のオーバーヘッドにより効果が薄れる。
-> 小規模メッシュ（~10k頂点）向けに限定的に採用を検討。
+> ⚠️ **条件付き運用（レビュアー指摘 2025-12-30）:**
+>
+> `query_ball_tree` は一括取得のオーバーヘッドにより、**大規模データでは逆効果になる可能性があります。**
+>
+> **採用条件（以下のいずれかを満たす場合のみ）:**
+> 1. **小規模限定**: 頂点数が 10,000 以下のメッシュ
+> 2. **k近傍制限**: `query_ball_tree` の代わりに `query(k=N)` を使用し、固定数の近傍のみを取得
+>
+> **実装時の判断ロジック:**
+> ```python
+> QUERY_BALL_TREE_THRESHOLD = 10000  # この頂点数以下でのみ使用
+>
+> if num_vertices <= QUERY_BALL_TREE_THRESHOLD:
+>     # 小規模: query_ball_tree で一括取得
+>     all_neighbors = kdtree.query_ball_tree(kdtree, radius)
+> else:
+>     # 大規模: 従来の query_ball_point ループ（または k近傍）
+>     for i in range(num_vertices):
+>         neighbors = kdtree.query_ball_point(vertex_coords[i], radius)
+> ```
+>
+> **代替案（k近傍）:**
+> ```python
+> # 半径ベースではなく、固定数の近傍を取得
+> MAX_NEIGHBORS = 32  # 近傍数の上限
+> distances, indices = kdtree.query(vertex_coords, k=MAX_NEIGHBORS)
+> ```
 
 ---
 
@@ -698,3 +765,4 @@ blender --background --python retarget_script2_14.py -- \
 | 2025-12-30 | 1.3 | Phase 1 最適化ベンチマーク実測結果追加（10k/30k頂点、Numba JIT、query_ball_tree、KDTree caching）|
 | 2025-12-30 | 1.4 | 各最適化施策の「期待効果」を実測値に基づいて修正、優先度順に並び替え |
 | 2025-12-30 | 1.5 | **P1-0: foreach_get + NumPy batch 追加（~20x効果）**、レビュアー意見に基づく再調査、目標時間上方修正 |
+| 2025-12-30 | 1.6 | レビュアー追加指摘対応: BMesh/Mesh API 分類表、配列事前確保パターン、目標時間保守的見直し、query_ball_tree 条件付き運用を明記 |
