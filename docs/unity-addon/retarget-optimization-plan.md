@@ -36,6 +36,7 @@ Issue #36 のリファクタリング完了後、次のステップとして処�
 |------|-----------|----------|------|
 | 2025-12-30 11:52 | Phase 2 完了 | **287.62秒** | ベースライン |
 | 2025-12-30 14:04 | Phase 3.1 | 291.31秒 | RetargetContext導入 |
+| 2025-12-30 14:52 | Phase 3.2 | 298.08秒 | 関数分離（PR#45） |
 | 2025-12-30 16:22 | Phase 3.2 + PR#47 | 343.59秒 | データ整合性修正含む |
 
 ### 2.2 処理フロー
@@ -125,24 +126,30 @@ distances = np.linalg.norm(neighbor_coords - vertex_coords[i], axis=1)
 
 **最適化後:**
 ```python
-from numba import jit, prange
+from numba import jit
 
-@jit(nopython=True, parallel=True, fastmath=True)
-def compute_distances_batch(vertices, target_points):
-    """Numba JIT版 距離計算"""
-    n, m = len(vertices), len(target_points)
-    distances = np.empty((n, m), dtype=np.float32)
+@jit(nopython=True, fastmath=True)
+def compute_distances_from_point(center, neighbor_coords):
+    """Numba JIT版: 1頂点から近傍点群への距離計算
 
-    for i in prange(n):
-        for j in range(m):
-            dist = 0.0
-            for k in range(3):
-                d = vertices[i, k] - target_points[j, k]
-                dist += d * d
-            distances[i, j] = np.sqrt(dist)
+    スムージング処理では各頂点について、KDTreeで取得した近傍点との距離を計算する。
+    この関数は1頂点(center)から近傍点群(neighbor_coords)への距離配列を返す。
+    """
+    n = len(neighbor_coords)
+    distances = np.empty(n, dtype=np.float32)
+
+    for j in range(n):
+        dist = 0.0
+        for k in range(3):
+            d = center[k] - neighbor_coords[j, k]
+            dist += d * d
+        distances[j] = np.sqrt(dist)
 
     return distances
 ```
+
+> **Note**: この関数は `kdtree.query_ball_point()` で取得した近傍点に対して使用します。
+> 全頂点×全頂点の距離行列を計算するのではなく、各頂点の近傍のみを処理します。
 
 **期待効果:** +100-300%（距離計算部分）
 **リスク:** 低（Numba未インストール時はフォールバック）
@@ -349,6 +356,7 @@ Phase 3 (GPU加速・将来検討):
 | パッケージ | 用途 | 必須/オプション |
 |-----------|------|----------------|
 | numba | JITコンパイル | オプション |
+| psutil | メモリ/CPU使用量の計測 | オプション（未インストール時は計測スキップ） |
 | (cupy) | GPU加速 | オプション（Phase 3） |
 
 ### 5.2 フォールバック戦略
@@ -408,18 +416,30 @@ def compute_distances(A, B):
 | 項目 | 測定方法 | 目標 |
 |------|---------|------|
 | 処理時間 | `time.time()` | 各フェーズ個別 + 合計 |
-| メモリ使用量 | `psutil.Process().memory_info()` | ピーク値 |
-| CPU使用率 | `psutil.cpu_percent()` | 平均値 |
+| メモリ使用量 | `psutil.Process().memory_info()` | ピーク値（psutil がない場合はスキップ） |
+| CPU使用率 | `psutil.cpu_percent()` | 平均値（psutil がない場合はスキップ） |
 | 精度 | 出力FBXの比較 | 視覚的差異なし |
 
-### 6.3 ベンチマークスクリプト
+### 6.3 ベンチマーク実行手順
+
+ベンチマークは Unity アドオンを通じて、または Blender CLI で直接実行できます。
+
+**Blender CLI 実行例（チェーン処理）:**
 
 ```bash
-# CLI実行
-python run_retarget.py --preset beryl_to_mao --benchmark
-
-# 結果は Outputs/benchmark_results.json に保存
+blender --background --python retarget_script2_14.py -- \
+    --input="Beryl_Costumes.fbx" \
+    --output="benchmark_output.fbx" \
+    --base="base_project.blend" \
+    --base-fbx="Template.fbx;mao.fbx" \
+    --config="config_beryl2template.json;config_template2mao.json" \
+    --init-pose="initial_pose.json" \
+    --hips-position="0.00000000,0.00955725,0.93028500" \
+    --target-meshes="Costume_Body;Costume_Socks;HighHeel"
 ```
+
+> **Note**: 詳細なパラメータは [Execute Retargeting コマンド詳細](execute_retargeting.md) を参照してください。
+> 処理時間はスクリプト内部で計測され、コンソールに出力されます。
 
 ---
 
