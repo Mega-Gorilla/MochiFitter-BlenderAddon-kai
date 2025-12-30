@@ -6103,17 +6103,19 @@ def inverse_bone_deform_all_vertices(armature_obj, mesh_obj):
         raise ValueError("有効なメッシュオブジェクトを指定してください")
 
     # ワールド座標に変換（変形後の頂点位置）
-    vertices = get_mesh_vertices_foreach(mesh_obj.data).copy()
+    vertices_np = get_mesh_vertices_foreach(mesh_obj.data).copy()
+
+    # numpy配列をVectorリストに一括変換（ループ内変換より高速）
+    vertices = [Vector(v) for v in vertices_np]
 
     # 結果を格納するリスト
     inverse_transformed_vertices = []
-    
+
     print(f"ボーン変形の逆変換を開始: {len(vertices)}頂点")
-    
+
     # 各頂点に対して逆変換を適用
     for vertex_index in range(len(vertices)):
-        # numpy配列をVectorに変換（Matrix乗算のため）
-        pos = Vector(vertices[vertex_index])
+        pos = vertices[vertex_index]
         
         # 頂点のボーンウェイトを取得
         weights = get_vertex_groups_and_weights(mesh_obj, vertex_index)
@@ -6176,8 +6178,8 @@ def inverse_bone_deform_all_vertices(armature_obj, mesh_obj):
         for shape_key in mesh_obj.data.shape_keys.key_blocks:
             if shape_key.name != "Basis":
                 for i, vert in enumerate(shape_key.data):
-                    # numpy配列をVectorに変換して減算（型の整合性）
-                    vert.co += inverse_transformed_vertices[i] - Vector(vertices[i])
+                    # verticesは既にVectorリストなので直接減算可能
+                    vert.co += inverse_transformed_vertices[i] - vertices[i]
         basis_shape_key = mesh_obj.data.shape_keys.key_blocks["Basis"]
         for i, vert in enumerate(basis_shape_key.data):
             vert.co = inverse_transformed_vertices[i]
