@@ -19295,20 +19295,343 @@ def update_cloth_metadata(metadata_dict: dict, output_path: str, vertex_index_ma
 # Main Processing Functions
 # =============================================================================
 
+def print_config_details(config_pair: dict) -> None:
+    """
+    設定ファイルの内容をデバッグ用に出力する。
+
+    Args:
+        config_pair: 設定ペアの辞書
+    """
+    for key in ['config_path', 'base_avatar_data', 'clothing_avatar_data', 'pose_data']:
+        if key in config_pair and config_pair[key]:
+            file_path = config_pair[key]
+            print(f"\n===== {key}: {file_path} =====")
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    print(f.read())
+            except Exception as e:
+                print(f"Error reading {file_path}: {e}")
+            print(f"===== End of {key} =====\n")
+
+
+def clean_mesh_invalid_vertices(mesh_obj) -> None:
+    """
+    メッシュから独立頂点と非有限頂点を削除する。
+
+    Args:
+        mesh_obj: Blenderメッシュオブジェクト
+    """
+    if mesh_obj.type != 'MESH':
+        return
+
+    mesh = mesh_obj.data
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(mesh)
+
+        # 独立頂点（エッジも面も構成しない頂点）をカウント
+        loose_verts = [v for v in bm.verts if len(v.link_edges) == 0]
+
+        # LOOSE_VERTEX_THRESHOLD 個以上の場合は削除
+        if len(loose_verts) >= LOOSE_VERTEX_THRESHOLD:
+            print(f"Removing {len(loose_verts)} loose vertices from {mesh_obj.name}")
+            for v in loose_verts:
+                bm.verts.remove(v)
+
+        # 座標がfiniteでない頂点を削除
+        non_finite_verts = [v for v in bm.verts if not (math.isfinite(v.co.x) and math.isfinite(v.co.y) and math.isfinite(v.co.z))]
+        if non_finite_verts:
+            print(f"Removing {len(non_finite_verts)} non-finite vertices from {mesh_obj.name}")
+            for v in non_finite_verts:
+                bm.verts.remove(v)
+
+        bm.to_mesh(mesh)
+    finally:
+        bm.free()
+
+
+def apply_sub_bone_overrides(base_avatar_data: dict) -> tuple:
+    """
+    subHumanoidBones と subAuxiliaryBones でベースデータを上書きする。
+
+    Args:
+        base_avatar_data: ベースアバターデータ
+
+    Returns:
+        tuple: (original_humanoid_bones, original_auxiliary_bones) 復元用のバックアップ
+    """
+    original_humanoid_bones = None
+    original_auxiliary_bones = None
+
+    if not (base_avatar_data.get('subHumanoidBones') or base_avatar_data.get('subAuxiliaryBones')):
+        return original_humanoid_bones, original_auxiliary_bones
+
+    print("subHumanoidBonesとsubAuxiliaryBonesを適用中...")
+
+    # 元のデータをバックアップ
+    original_humanoid_bones = base_avatar_data.get('humanoidBones', []).copy() if base_avatar_data.get('humanoidBones') else []
+    original_auxiliary_bones = base_avatar_data.get('auxiliaryBones', []).copy() if base_avatar_data.get('auxiliaryBones') else []
+
+    # subHumanoidBonesで上書き
+    if base_avatar_data.get('subHumanoidBones'):
+        sub_humanoid_bones = base_avatar_data['subHumanoidBones']
+        humanoid_bones = base_avatar_data.get('humanoidBones', [])
+
+        for sub_bone in sub_humanoid_bones:
+            sub_humanoid_name = sub_bone.get('humanoidBoneName')
+            if sub_humanoid_name:
+                # 既存のhumanoidBonesから同じhumanoidBoneNameを持つものを探す
+                found = False
+                for i, existing_bone in enumerate(humanoid_bones):
+                    if existing_bone.get('humanoidBoneName') == sub_humanoid_name:
+                        humanoid_bones[i] = sub_bone.copy()
+                        found = True
+                        break
+                if not found:
+                    # 見つからない場合は追加
+                    humanoid_bones.append(sub_bone.copy())
+
+    # subAuxiliaryBonesで上書き
+    if base_avatar_data.get('subAuxiliaryBones'):
+        sub_auxiliary_bones = base_avatar_data['subAuxiliaryBones']
+        auxiliary_bones = base_avatar_data.get('auxiliaryBones', [])
+
+        for sub_aux in sub_auxiliary_bones:
+            sub_humanoid_name = sub_aux.get('humanoidBoneName')
+            if sub_humanoid_name:
+                # 既存のauxiliaryBonesから同じhumanoidBoneNameを持つものを探す
+                found = False
+                for i, existing_aux in enumerate(auxiliary_bones):
+                    if existing_aux.get('humanoidBoneName') == sub_humanoid_name:
+                        auxiliary_bones[i] = sub_aux.copy()
+                        found = True
+                        break
+                if not found:
+                    # 見つからない場合は追加
+                    auxiliary_bones.append(sub_aux.copy())
+
+    print("subHumanoidBonesとsubAuxiliaryBonesの適用完了")
+    return original_humanoid_bones, original_auxiliary_bones
+
+
+def restore_bone_overrides(base_avatar_data: dict, original_humanoid_bones, original_auxiliary_bones) -> None:
+    """
+    subHumanoidBones/subAuxiliaryBones で上書きしたデータを元に戻す。
+
+    Args:
+        base_avatar_data: ベースアバターデータ
+        original_humanoid_bones: 元のhumanoidBones
+        original_auxiliary_bones: 元のauxiliaryBones
+    """
+    if original_humanoid_bones is None and original_auxiliary_bones is None:
+        return
+
+    print("元のhumanoidBonesとauxiliaryBonesを復元中...")
+    if original_humanoid_bones is not None:
+        base_avatar_data['humanoidBones'] = original_humanoid_bones
+    if original_auxiliary_bones is not None:
+        base_avatar_data['auxiliaryBones'] = original_auxiliary_bones
+    print("元のボーンデータの復元完了")
+
+
+def process_mesh_in_cycle1(
+    obj,
+    config_pair: dict,
+    clothing_avatar_data: dict,
+    base_avatar_data: dict,
+    clothing_armature,
+    cloth_metadata: dict,
+    pair_index: int,
+    total_pairs: int,
+    use_subdivision: bool,
+    use_triangulation: bool,
+    blend_shape_labels: list,
+    propagated_groups_map: dict,
+    head_parts: set
+) -> None:
+    """
+    Cycle1でのメッシュ処理（変形フィールド適用、ウェイト処理など）。
+
+    Args:
+        obj: 処理対象のメッシュオブジェクト
+        config_pair: 設定ペア
+        clothing_avatar_data: 衣装アバターデータ
+        base_avatar_data: ベースアバターデータ
+        clothing_armature: 衣装アーマチュア
+        cloth_metadata: クロスメタデータ
+        pair_index: ペアインデックス
+        total_pairs: 総ペア数
+        use_subdivision: サブディビジョン使用フラグ
+        use_triangulation: 三角化使用フラグ
+        blend_shape_labels: ブレンドシェイプラベルリスト
+        propagated_groups_map: 伝播グループマップ（更新される）
+        head_parts: ヘッドパーツセット（更新される）
+    """
+    import time
+    obj_start = time.time()
+    print("cycle1 " + obj.name)
+
+    reset_shape_keys(obj)
+    remove_empty_vertex_groups(obj)
+    normalize_vertex_weights(obj)
+    merge_auxiliary_to_humanoid_weights(obj, clothing_avatar_data)
+
+    # ウェイトの伝播を実行
+    temp_group_name = propagate_bone_weights(obj)
+    if temp_group_name:  # 伝播が実行された場合のみ記録
+        propagated_groups_map[obj.name] = temp_group_name
+
+    # 微小なウェイトを除外
+    cleanup_weights_time_start = time.time()
+    for vert in obj.data.vertices:
+        groups_to_remove = []
+        for g in vert.groups:
+            if g.weight < MIN_WEIGHT_THRESHOLD:
+                groups_to_remove.append(g.group)
+
+        # 微小なウェイトを持つグループからその頂点を削除
+        for group_idx in groups_to_remove:
+            try:
+                obj.vertex_groups[group_idx].remove([vert.index])
+            except RuntimeError:
+                continue
+    cleanup_weights_time = time.time() - cleanup_weights_time_start
+    print(f"  微小ウェイト除外: {cleanup_weights_time:.2f}秒")
+
+    if is_head_part(obj, clothing_avatar_data):
+        head_parts.add(obj.name)
+        print(f"  {obj.name} is head part")
+        return
+
+    create_deformation_mask(obj, clothing_avatar_data)
+
+    if pair_index == 0 and use_subdivision and obj.name not in cloth_metadata:
+        subdivide_long_edges(obj)
+        subdivide_breast_faces(obj, clothing_avatar_data)
+
+    if use_triangulation and not use_subdivision and obj.name not in cloth_metadata and pair_index == total_pairs - 1:
+        triangulate_mesh(obj)
+
+    # 頂点ウェイトを記録し、ボーンウェイトを統合
+    original_weights = save_vertex_weights(obj)
+
+    # ボーンウェイトの統合処理
+    process_bone_weight_consolidation(obj, clothing_avatar_data)
+
+    process_mesh_with_connected_components_inline(
+        obj,
+        config_pair['field_data'],
+        blend_shape_labels,
+        clothing_avatar_data,
+        base_avatar_data,
+        clothing_armature,
+        cloth_metadata,
+        subdivision=use_subdivision,
+        skip_blend_shape_generation=config_pair['skip_blend_shape_generation'],
+        config_data=config_pair['config_data']
+    )
+
+    # イテレーション終了時: 元のウェイト状態に復元
+    restore_vertex_weights(obj, original_weights)
+
+    if obj.data.shape_keys:
+        # _generatedサフィックス付きシェイプキーの処理
+        generated_shape_keys = []
+        for shape_key in obj.data.shape_keys.key_blocks:
+            if shape_key.name.endswith("_generated"):
+                generated_shape_keys.append(shape_key.name)
+
+        # _generatedシェイプキーを対応するベースシェイプキーに統合
+        for generated_name in generated_shape_keys:
+            base_name = generated_name[:-10]  # "_generated"を除去
+
+            generated_key = obj.data.shape_keys.key_blocks.get(generated_name)
+            base_key = obj.data.shape_keys.key_blocks.get(base_name)
+
+            if generated_key and base_key:
+                # generatedシェイプキーの内容でベースシェイプキーを上書き
+                for i, point in enumerate(generated_key.data):
+                    base_key.data[i].co = point.co
+                print(f"Merged {generated_name} into {base_name} for {obj.name}")
+
+                # generatedシェイプキーを削除
+                obj.shape_key_remove(generated_key)
+                print(f"Removed generated shape key: {generated_name} from {obj.name}")
+
+    print(f"  {obj.name}の処理: {time.time() - obj_start:.2f}秒")
+
+
+def preprocess_for_export(
+    args,
+    clothing_meshes: list,
+    clothing_avatar_data: dict,
+    base_avatar_data: dict,
+    pair_index: int
+) -> None:
+    """
+    FBXエクスポート前の前処理を行う。
+
+    Args:
+        args: コマンドライン引数
+        clothing_meshes: 衣装メッシュリスト
+        clothing_avatar_data: 衣装アバターデータ
+        base_avatar_data: ベースアバターデータ
+        pair_index: ペアインデックス
+    """
+    import re
+
+    # blend_shape_labelsの取得
+    blend_shape_labels = []
+    if args.blend_shapes:
+        blend_shape_labels = [label for label in args.blend_shapes.split(';')]
+
+    for obj in clothing_meshes:
+        if obj.data.shape_keys:
+            for key_block in obj.data.shape_keys.key_blocks:
+                print(f"Shape key: {key_block.name} / {key_block.value} found on {obj.name}")
+
+    # apply_blendshape_deformation_fieldsで作成されたシェイプキーを削除
+    merge_and_clean_generated_shapekeys(clothing_meshes, blend_shape_labels)
+
+    if clothing_avatar_data.get("name", None) == "Template":
+        pattern = re.compile(r'___\d+$')
+        for obj in clothing_meshes:
+            if obj.data.shape_keys:
+                keys_to_remove = []
+                for key_block in obj.data.shape_keys.key_blocks:
+                    if pattern.search(key_block.name):
+                        keys_to_remove.append(key_block.name)
+                for key_name in keys_to_remove:
+                    key_block = obj.data.shape_keys.key_blocks.get(key_name)
+                    if key_block:
+                        obj.shape_key_remove(key_block)
+                        print(f"Removed shape key: {key_name} from {obj.name}")
+
+    if pair_index > 0:
+        bpy.ops.object.mode_set(mode='OBJECT')
+        clothing_blend_shape_labels = []
+        for blend_shape_field in clothing_avatar_data['blendShapeFields']:
+            clothing_blend_shape_labels.append(blend_shape_field['label'])
+        base_blend_shape_labels = []
+        for blend_shape_field in base_avatar_data['blendShapeFields']:
+            base_blend_shape_labels.append(blend_shape_field['label'])
+        for obj in clothing_meshes:
+            if obj.data.shape_keys:
+                for key_block in obj.data.shape_keys.key_blocks:
+                    if key_block.name in clothing_blend_shape_labels and key_block.name not in base_blend_shape_labels:
+                        prev_shape_key = obj.data.shape_keys.key_blocks.get(key_block.name)
+                        obj.shape_key_remove(prev_shape_key)
+                        print(f"Removed shape key: {key_block.name} from {obj.name}")
+
+    # Highheelシェイプキーの値を1に設定
+    set_highheel_shapekey_values(clothing_meshes, blend_shape_labels, base_avatar_data)
+
+
 def process_single_config(args, config_pair, pair_index, total_pairs, overall_start_time):
     try:
         # 設定ファイルの内容を出力
-        for key in ['config_path', 'base_avatar_data', 'clothing_avatar_data', 'pose_data']:
-            if key in config_pair and config_pair[key]:
-                file_path = config_pair[key]
-                print(f"\n===== {key}: {file_path} =====")
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        print(f.read())
-                except Exception as e:
-                    print(f"Error reading {file_path}: {e}")
-                print(f"===== End of {key} =====\n")
-        
+        print_config_details(config_pair)
+
         import time
         start_time = time.time()
 
@@ -19430,30 +19753,7 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
         
         # clothing_meshesの独立頂点とnon-finite頂点を削除
         for mesh_obj in clothing_meshes:
-            if mesh_obj.type != 'MESH':
-                continue
-            mesh = mesh_obj.data
-            bm = bmesh.new()
-            bm.from_mesh(mesh)
-            
-            # 独立頂点（エッジも面も構成しない頂点）をカウント
-            loose_verts = [v for v in bm.verts if len(v.link_edges) == 0]
-            
-            # LOOSE_VERTEX_THRESHOLD 個以上の場合は削除
-            if len(loose_verts) >= LOOSE_VERTEX_THRESHOLD:
-                print(f"Removing {len(loose_verts)} loose vertices from {mesh_obj.name}")
-                for v in loose_verts:
-                    bm.verts.remove(v)
-            
-            # 座標がfiniteでない頂点を削除
-            non_finite_verts = [v for v in bm.verts if not (math.isfinite(v.co.x) and math.isfinite(v.co.y) and math.isfinite(v.co.z))]
-            if non_finite_verts:
-                print(f"Removing {len(non_finite_verts)} non-finite vertices from {mesh_obj.name}")
-                for v in non_finite_verts:
-                    bm.verts.remove(v)
-            
-            bm.to_mesh(mesh)
-            bm.free()
+            clean_mesh_invalid_vertices(mesh_obj)
 
         # Setup weight transfer
         print("Status: ウェイト転送セットアップ中")
@@ -19612,98 +19912,22 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
         cycle1_start = time.time()
         head_parts = set()
         for obj in clothing_meshes:
-            obj_start = time.time()
-            print("cycle1 " + obj.name)
-
-            reset_shape_keys(obj)
-            remove_empty_vertex_groups(obj)
-            normalize_vertex_weights(obj)
-            merge_auxiliary_to_humanoid_weights(obj, clothing_avatar_data)
- 
-            # ウェイトの伝播を実行
-            temp_group_name = propagate_bone_weights(obj)
-            if temp_group_name:  # 伝播が実行された場合のみ記録
-                propagated_groups_map[obj.name] = temp_group_name
-            
-            # 微小なウェイトを除外
-            cleanup_weights_time_start = time.time()
-            for vert in obj.data.vertices:
-                groups_to_remove = []
-                for g in vert.groups:
-                    if g.weight < MIN_WEIGHT_THRESHOLD:
-                        groups_to_remove.append(g.group)
-                
-                # 微小なウェイトを持つグループからその頂点を削除
-                for group_idx in groups_to_remove:
-                    try:
-                        obj.vertex_groups[group_idx].remove([vert.index])
-                    except RuntimeError:
-                        continue
-            cleanup_weights_time = time.time() - cleanup_weights_time_start
-            print(f"  微小ウェイト除外: {cleanup_weights_time:.2f}秒")
-
-            if is_head_part(obj, clothing_avatar_data):
-                head_parts.add(obj.name)
-                print(f"  {obj.name} is head part")
-                continue
-            
-            create_deformation_mask(obj, clothing_avatar_data)
-
-            if pair_index == 0 and use_subdivision and obj.name not in cloth_metadata:
-                subdivide_long_edges(obj)
-                subdivide_breast_faces(obj, clothing_avatar_data)
-            
-            if use_triangulation and not use_subdivision and obj.name not in cloth_metadata and pair_index == total_pairs - 1:
-                triangulate_mesh(obj)
-            
-            # 頂点ウェイトを記録し、ボーンウェイトを統合
-            original_weights = save_vertex_weights(obj)
-            
-            # ボーンウェイトの統合処理
-            process_bone_weight_consolidation(obj, clothing_avatar_data)
-            
-            process_mesh_with_connected_components_inline(
-                obj, 
-                config_pair['field_data'], 
-                blend_shape_labels, 
-                clothing_avatar_data, 
-                base_avatar_data, 
+            process_mesh_in_cycle1(
+                obj,
+                config_pair,
+                clothing_avatar_data,
+                base_avatar_data,
                 clothing_armature,
                 cloth_metadata,
-                subdivision=use_subdivision,
-                skip_blend_shape_generation=config_pair['skip_blend_shape_generation'],
-                config_data=config_pair['config_data']
+                pair_index,
+                total_pairs,
+                use_subdivision,
+                use_triangulation,
+                blend_shape_labels,
+                propagated_groups_map,
+                head_parts
             )
-            
-            # イテレーション終了時: 元のウェイト状態に復元
-            restore_vertex_weights(obj, original_weights)
 
-            if obj.data.shape_keys:          
-                # _generatedサフィックス付きシェイプキーの処理
-                generated_shape_keys = []
-                for shape_key in obj.data.shape_keys.key_blocks:
-                    if shape_key.name.endswith("_generated"):
-                        generated_shape_keys.append(shape_key.name)
-                
-                # _generatedシェイプキーを対応するベースシェイプキーに統合
-                for generated_name in generated_shape_keys:
-                    base_name = generated_name[:-10]  # "_generated"を除去
-                    
-                    generated_key = obj.data.shape_keys.key_blocks.get(generated_name)
-                    base_key = obj.data.shape_keys.key_blocks.get(base_name)
-                    
-                    if generated_key and base_key:
-                        # generatedシェイプキーの内容でベースシェイプキーを上書き
-                        for i, point in enumerate(generated_key.data):
-                            base_key.data[i].co = point.co
-                        print(f"Merged {generated_name} into {base_name} for {obj.name}")
-                        
-                        # generatedシェイプキーを削除
-                        obj.shape_key_remove(generated_key)
-                        print(f"Removed generated shape key: {generated_name} from {obj.name}")
-            
-            print(f"  {obj.name}の処理: {time.time() - obj_start:.2f}秒")
-        
         cycle1_end = time.time()
         print(f"サイクル1全体: {cycle1_end - cycle1_start:.2f}秒")
 
@@ -19734,54 +19958,7 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
         cycle2_pre_start = time.time()
         
         # アバターデータからsubHumanoidBonesとsubAuxiliaryBonesを取得し、現在のデータを上書き
-        # その前に変更前のデータを保存
-        original_humanoid_bones = None
-        original_auxiliary_bones = None
-        
-        if base_avatar_data.get('subHumanoidBones') or base_avatar_data.get('subAuxiliaryBones'):
-            print("subHumanoidBonesとsubAuxiliaryBonesを適用中...")
-            
-            # 元のデータをバックアップ
-            original_humanoid_bones = base_avatar_data.get('humanoidBones', []).copy() if base_avatar_data.get('humanoidBones') else []
-            original_auxiliary_bones = base_avatar_data.get('auxiliaryBones', []).copy() if base_avatar_data.get('auxiliaryBones') else []
-            
-            # subHumanoidBonesで上書き
-            if base_avatar_data.get('subHumanoidBones'):
-                # 現在のhumanoidBonesから同じhumanoidBoneNameを持つものを探して上書き
-                sub_humanoid_bones = base_avatar_data['subHumanoidBones']
-                humanoid_bones = base_avatar_data.get('humanoidBones', [])
-                
-                for sub_bone in sub_humanoid_bones:
-                    sub_humanoid_name = sub_bone.get('humanoidBoneName')
-                    if sub_humanoid_name:
-                        # 既存のhumanoidBonesから同じhumanoidBoneNameを持つものを探す
-                        for i, existing_bone in enumerate(humanoid_bones):
-                            if existing_bone.get('humanoidBoneName') == sub_humanoid_name:
-                                humanoid_bones[i] = sub_bone.copy()
-                                break
-                        else:
-                            # 見つからない場合は追加
-                            humanoid_bones.append(sub_bone.copy())
-            
-            # subAuxiliaryBonesで上書き
-            if base_avatar_data.get('subAuxiliaryBones'):
-                # 現在のauxiliaryBonesから同じhumanoidBoneNameを持つものを探して上書き
-                sub_auxiliary_bones = base_avatar_data['subAuxiliaryBones']
-                auxiliary_bones = base_avatar_data.get('auxiliaryBones', [])
-                
-                for sub_aux in sub_auxiliary_bones:
-                    sub_humanoid_name = sub_aux.get('humanoidBoneName')
-                    if sub_humanoid_name:
-                        # 既存のauxiliaryBonesから同じhumanoidBoneNameを持つものを探す
-                        for i, existing_aux in enumerate(auxiliary_bones):
-                            if existing_aux.get('humanoidBoneName') == sub_humanoid_name:
-                                auxiliary_bones[i] = sub_aux.copy()
-                                break
-                        else:
-                            # 見つからない場合は追加
-                            auxiliary_bones.append(sub_aux.copy())
-            
-            print("subHumanoidBonesとsubAuxiliaryBonesの適用完了")
+        original_humanoid_bones, original_auxiliary_bones = apply_sub_bone_overrides(base_avatar_data)
 
         # if clothing_avatar_data.get("name", None) != "Template":
         #     select_vertices_by_conditions(base_mesh, "MF_crotch", base_avatar_data, radius=0.075, max_angle_degrees=45.0)
@@ -19951,13 +20128,7 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
         print(f"伝播ウェイト削除: {propagated_end - propagated_start:.2f}秒")
         
         # subHumanoidBonesとsubAuxiliaryBonesを適用していた場合、元のデータを復元
-        if original_humanoid_bones is not None or original_auxiliary_bones is not None:
-            print("元のhumanoidBonesとauxiliaryBonesを復元中...")
-            if original_humanoid_bones is not None:
-                base_avatar_data['humanoidBones'] = original_humanoid_bones
-            if original_auxiliary_bones is not None:
-                base_avatar_data['auxiliaryBones'] = original_auxiliary_bones
-            print("元のボーンデータの復元完了")
+        restore_bone_overrides(base_avatar_data, original_humanoid_bones, original_auxiliary_bones)
         
         print("Status: ヒューマノイドボーン置換中")
         print(f"Progress: {(pair_index + 0.95) / total_pairs * 0.9:.3f}")
@@ -20017,59 +20188,9 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
         print("Status: FBXエクスポート前処理中")
         print(f"Progress: {(pair_index + 0.975) / total_pairs * 0.9:.3f}")
         preprocess_start = time.time()
-        
-        # blend_shape_labelsの取得
-        blend_shape_labels = []
-        if args.blend_shapes:
-            blend_shape_labels = [label for label in args.blend_shapes.split(';')]
-        
-        for obj in clothing_meshes:
-            if obj.data.shape_keys:
-                for key_block in obj.data.shape_keys.key_blocks:
-                    print(f"Shape key: {key_block.name} / {key_block.value} found on {obj.name}")
-        
-        # apply_blendshape_deformation_fieldsで作成されたシェイプキーを削除
-        merge_and_clean_generated_shapekeys(clothing_meshes, blend_shape_labels)
-        if clothing_avatar_data.get("name", None) == "Template":
-            import re
-            pattern = re.compile(r'___\d+$')
-            for obj in clothing_meshes:
-                if obj.data.shape_keys:
-                    keys_to_remove = []
-                    for key_block in obj.data.shape_keys.key_blocks:
-                        if pattern.search(key_block.name):
-                            keys_to_remove.append(key_block.name)
-                    for key_name in keys_to_remove:
-                        key_block = obj.data.shape_keys.key_blocks.get(key_name)
-                        if key_block:
-                            obj.shape_key_remove(key_block)
-                            print(f"Removed shape key: {key_name} from {obj.name}")
 
-        if pair_index > 0:
-            bpy.ops.object.mode_set(mode='OBJECT')
-            clothing_blend_shape_labels = []
-            for blend_shape_field in clothing_avatar_data['blendShapeFields']:
-                clothing_blend_shape_labels.append(blend_shape_field['label'])
-            base_blend_shape_labels = []
-            for blend_shape_field in base_avatar_data['blendShapeFields']:
-                base_blend_shape_labels.append(blend_shape_field['label'])
-            for obj in clothing_meshes:
-                if obj.data.shape_keys:
-                    for key_block in obj.data.shape_keys.key_blocks:
-                        if key_block.name in clothing_blend_shape_labels and key_block.name not in base_blend_shape_labels:
-                            prev_shape_key = obj.data.shape_keys.key_blocks.get(key_block.name)
-                            obj.shape_key_remove(prev_shape_key)
-                            print(f"Removed shape key: {key_block.name} from {obj.name}")
-        
-        # Highheelシェイプキーの値を1に設定
-        set_highheel_shapekey_values(clothing_meshes, blend_shape_labels, base_avatar_data)
+        preprocess_for_export(args, clothing_meshes, clothing_avatar_data, base_avatar_data, pair_index)
 
-        # Export armature bone data to JSON before FBX export
-        # print(f"Status: ボーン情報JSON出力中")
-        # json_output_path = args.output.rsplit('.', 1)[0] + '_bone_data.json'
-        # bpy.context.view_layer.update()
-        # export_armature_bone_data_to_json(clothing_armature, json_output_path)
-        
         preprocess_end = time.time()
         print(f"FBXエクスポート前処理: {preprocess_end - preprocess_start:.2f}秒")
 

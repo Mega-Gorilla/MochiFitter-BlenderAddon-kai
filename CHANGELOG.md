@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - グローバル変数を dataclass ベースのコンテキストクラスに集約
   - 後方互換性のためエイリアスを維持
   - `clear_all_caches()` を `_context.clear_all_caches()` に委譲
+- **Unity アドオン**: `process_single_config()` を関数分離（Phase 3.2 リファクタリング）
+  - `print_config_details()`: 設定ファイル内容のデバッグ出力
+  - `clean_mesh_invalid_vertices()`: 独立・非有限頂点の削除
+  - `apply_sub_bone_overrides()` / `restore_bone_overrides()`: サブボーン上書き管理
+  - `process_mesh_in_cycle1()`: Cycle1 メッシュ処理の抽出
+  - `preprocess_for_export()`: FBXエクスポート前処理の抽出
+  - `process_single_config()` が約820行→オーケストレーション関数に変換
 
 ### Fixed
 - **Unity アドオン**: チェーン処理時のメモリ不足クラッシュを修正 (Issue #34)
