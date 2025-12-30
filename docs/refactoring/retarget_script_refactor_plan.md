@@ -577,7 +577,7 @@ if __name__ == "__main__":
 ### 6.3 Phase 3（アーキテクチャ改善）
 
 ```
-[x] 3.1 グローバル変数のクラス化 (PR #TBD)
+[x] 3.1 グローバル変数のクラス化 (PR #43)
     [x] RetargetContext クラスの追加
     [x] エイリアスによる互換性維持
     [x] clear_all_caches() の _context への委譲
