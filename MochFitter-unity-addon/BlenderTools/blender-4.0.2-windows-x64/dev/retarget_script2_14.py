@@ -42,6 +42,19 @@ import gc
 import hashlib
 
 # =============================================================================
+# Optional: Numba JIT (P1-2)
+# =============================================================================
+# Numba はオプション依存。インストールされていない場合はNumPyベクトル化にフォールバック
+NUMBA_AVAILABLE = False
+try:
+    from numba import jit
+    NUMBA_AVAILABLE = True
+except ImportError:
+    # Numba 未導入時は NUMBA_AVAILABLE=False のまま
+    # 距離計算関数は NumPy ベクトル化版にフォールバック（性能回帰なし）
+    pass
+
+# =============================================================================
 # Constants
 # =============================================================================
 
@@ -350,6 +363,108 @@ def get_cached_kdtree(coords: np.ndarray, cache_key: str = None,
     _context.kdtree_cache[cache_key] = kdtree
 
     return kdtree
+
+
+# =============================================================================
+# Performance Optimization Helpers (P1-2: Numba JIT Distance Calculation)
+# =============================================================================
+
+if NUMBA_AVAILABLE:
+    # Numba JIT版: ループベースだが JIT コンパイルで高速化
+    @jit(nopython=True, fastmath=True)
+    def compute_distance_single(p1: np.ndarray, p2: np.ndarray) -> float:
+        """
+        2点間の距離を計算（Numba JIT版）
+
+        Parameters:
+            p1: 点1の座標 (3,)
+            p2: 点2の座標 (3,)
+
+        Returns:
+            float: 2点間のユークリッド距離
+        """
+        dist = 0.0
+        for k in range(3):
+            d = p1[k] - p2[k]
+            dist += d * d
+        return np.sqrt(dist)
+
+    @jit(nopython=True, fastmath=True)
+    def compute_distances_batch(center: np.ndarray, neighbor_coords: np.ndarray) -> np.ndarray:
+        """
+        1点から複数点への距離を一括計算（Numba JIT版）
+
+        Parameters:
+            center: 中心点の座標 (3,)
+            neighbor_coords: 近傍点の座標配列 (N, 3)
+
+        Returns:
+            np.ndarray: 各近傍点への距離 (N,)
+        """
+        n = len(neighbor_coords)
+        distances = np.empty(n, dtype=np.float64)
+        for j in range(n):
+            dist = 0.0
+            for k in range(3):
+                d = center[k] - neighbor_coords[j, k]
+                dist += d * d
+            distances[j] = np.sqrt(dist)
+        return distances
+
+    @jit(nopython=True, fastmath=True)
+    def compute_gaussian_weights(distances: np.ndarray, sigma: float) -> np.ndarray:
+        """
+        ガウシアン重み計算（Numba JIT版）
+
+        Parameters:
+            distances: 距離配列 (N,)
+            sigma: ガウス関数の標準偏差
+
+        Returns:
+            np.ndarray: ガウシアン重み (N,)
+        """
+        return np.exp(-(distances ** 2) / (2 * sigma ** 2))
+
+else:
+    # NumPy版: Numba未導入時はベクトル化演算にフォールバック
+    def compute_distance_single(p1: np.ndarray, p2: np.ndarray) -> float:
+        """
+        2点間の距離を計算（NumPy版フォールバック）
+
+        Parameters:
+            p1: 点1の座標 (3,)
+            p2: 点2の座標 (3,)
+
+        Returns:
+            float: 2点間のユークリッド距離
+        """
+        return float(np.linalg.norm(p1 - p2))
+
+    def compute_distances_batch(center: np.ndarray, neighbor_coords: np.ndarray) -> np.ndarray:
+        """
+        1点から複数点への距離を一括計算（NumPy版フォールバック）
+
+        Parameters:
+            center: 中心点の座標 (3,)
+            neighbor_coords: 近傍点の座標配列 (N, 3)
+
+        Returns:
+            np.ndarray: 各近傍点への距離 (N,)
+        """
+        return np.linalg.norm(neighbor_coords - center, axis=1)
+
+    def compute_gaussian_weights(distances: np.ndarray, sigma: float) -> np.ndarray:
+        """
+        ガウシアン重み計算（NumPy版フォールバック）
+
+        Parameters:
+            distances: 距離配列 (N,)
+            sigma: ガウス関数の標準偏差
+
+        Returns:
+            np.ndarray: ガウシアン重み (N,)
+        """
+        return np.exp(-(distances ** 2) / (2 * sigma ** 2))
 
 
 def get_shallowest_bone(armature: bpy.types.Object, avatar_data: dict = None) -> str:
@@ -5988,13 +6103,16 @@ def inverse_bone_deform_all_vertices(armature_obj, mesh_obj):
         raise ValueError("有効なメッシュオブジェクトを指定してください")
 
     # ワールド座標に変換（変形後の頂点位置）
-    vertices = get_mesh_vertices_foreach(mesh_obj.data).copy()
+    vertices_np = get_mesh_vertices_foreach(mesh_obj.data).copy()
+
+    # numpy配列をVectorリストに一括変換（ループ内変換より高速）
+    vertices = [Vector(v) for v in vertices_np]
 
     # 結果を格納するリスト
     inverse_transformed_vertices = []
-    
+
     print(f"ボーン変形の逆変換を開始: {len(vertices)}頂点")
-    
+
     # 各頂点に対して逆変換を適用
     for vertex_index in range(len(vertices)):
         pos = vertices[vertex_index]
@@ -6060,6 +6178,7 @@ def inverse_bone_deform_all_vertices(armature_obj, mesh_obj):
         for shape_key in mesh_obj.data.shape_keys.key_blocks:
             if shape_key.name != "Basis":
                 for i, vert in enumerate(shape_key.data):
+                    # verticesは既にVectorリストなので直接減算可能
                     vert.co += inverse_transformed_vertices[i] - vertices[i]
         basis_shape_key = mesh_obj.data.shape_keys.key_blocks["Basis"]
         for i, vert in enumerate(basis_shape_key.data):
@@ -13527,7 +13646,8 @@ def create_vertex_neighbors_array(obj, expand_distance=0.05, sigma=0.02):
         # 範囲内の頂点を検索
         for idx in kdtree.query_ball_point(vert_world, expand_distance):
             if idx != vert_idx:
-                dist = np.linalg.norm(world_coords[idx] - vert_world)
+                # P1-2: Numba JIT による距離計算高速化
+                dist = compute_distance_single(world_coords[idx], vert_world)
                 weight_factor = gaussian(dist, sigma)
                 neighbors_list[vert_idx].append((idx, weight_factor))
     
@@ -13645,10 +13765,11 @@ def create_vertex_neighbors_list(obj, expand_distance=0.05, sigma=0.02):
         # 範囲内の頂点を検索
         for idx in kdtree.query_ball_point(vert_world, expand_distance):
             if idx != vert_idx:
-                dist = np.linalg.norm(world_coords[idx] - vert_world)
+                # P1-2: Numba JIT による距離計算高速化
+                dist = compute_distance_single(world_coords[idx], vert_world)
                 weight_factor = gaussian(dist, sigma)
                 vert_neighbors[vert_idx].append((idx, weight_factor))
-    
+
     return vert_neighbors
 
 def custom_max_vertex_group(obj, group_name, vert_neighbors, repeat=3, weight_factor=1.0):
@@ -16247,17 +16368,17 @@ def apply_smoothing_to_vertex_group(cloth_obj, vertex_group_name, smoothing_radi
         for i in range(num_vertices):
             neighbor_indices = neighbors_cache[i]
             if len(neighbor_indices) > 1:  # 自分自身以外の近傍が存在する場合
-                # 近傍頂点への距離を計算
+                # 近傍頂点への距離を計算（P1-2: Numba JIT による高速化）
                 neighbor_coords = vertex_coords[neighbor_indices]
-                distances = np.linalg.norm(neighbor_coords - vertex_coords[i], axis=1)
-                
+                distances = compute_distances_batch(vertex_coords[i], neighbor_coords)
+
                 # 近傍頂点のウェイト値を取得
                 neighbor_weights = current_weights[neighbor_indices]
-                
+
                 if use_distance_weighting:
                     if gaussian_falloff:
-                        # ガウシアン減衰による重み計算
-                        weights = np.exp(-(distances ** 2) / (2 * sigma ** 2))
+                        # ガウシアン減衰による重み計算（P1-2: Numba JIT）
+                        weights = compute_gaussian_weights(distances, sigma)
                     else:
                         # 線形減衰による重み計算
                         weights = np.maximum(0, 1.0 - distances / smoothing_radius)
