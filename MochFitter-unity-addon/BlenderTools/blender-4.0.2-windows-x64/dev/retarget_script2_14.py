@@ -6103,10 +6103,10 @@ def inverse_bone_deform_all_vertices(armature_obj, mesh_obj):
         raise ValueError("有効なメッシュオブジェクトを指定してください")
 
     # ワールド座標に変換（変形後の頂点位置）
-    vertices_np = get_mesh_vertices_foreach(mesh_obj.data).copy()
-
-    # numpy配列をVectorリストに一括変換（ループ内変換より高速）
-    vertices = [Vector(v) for v in vertices_np]
+    # NOTE: この関数では foreach_get を使わず、直接 Vector を取得する。
+    # 理由: 後続の Matrix @ Vector 演算に Vector 型が必要であり、
+    # foreach_get → numpy → Vector 変換はオーバーヘッドが大きい。
+    vertices = [v.co.copy() for v in mesh_obj.data.vertices]
 
     # 結果を格納するリスト
     inverse_transformed_vertices = []
