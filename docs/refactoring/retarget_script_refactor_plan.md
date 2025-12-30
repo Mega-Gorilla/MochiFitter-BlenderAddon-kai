@@ -583,9 +583,13 @@ if __name__ == "__main__":
     [x] clear_all_caches() の _context への委譲
     [ ] 段階的な関数の移行（今後のPRで対応）
 
-[ ] 3.2 関数の責務分離
-    [ ] process_single_config の分割
-    [ ] その他大規模関数の分割
+[x] 3.2 関数の責務分離 (PR #TBD)
+    [x] print_config_details() - 設定ファイル内容出力
+    [x] clean_mesh_invalid_vertices() - 独立・非有限頂点削除
+    [x] apply_sub_bone_overrides() / restore_bone_overrides() - サブボーン上書き
+    [x] process_mesh_in_cycle1() - Cycle1メッシュ処理
+    [x] preprocess_for_export() - FBXエクスポート前処理
+    [x] process_single_config をオーケストレーション関数に変換
 
 [ ] 3.3 サブモジュール分割（オプション）
     [ ] ディレクトリ構造の作成
@@ -682,3 +686,4 @@ git tag -a v0.2.18-phase2 -m "Phase 2: コード品質改善完了"
 | 2025-12-29 | 1.0 | 初版作成 |
 | 2025-12-29 | 1.1 | Phase 1 完了、Phase 2.1 完了を反映（PR #38） |
 | 2025-12-30 | 1.2 | Phase 3.1 完了（RetargetContext クラス追加） |
+| 2025-12-30 | 1.3 | Phase 3.2 完了（関数の責務分離） |
