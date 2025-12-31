@@ -14768,11 +14768,17 @@ def apply_modifiers(obj):
         except Exception as e:
             print(f"Failed to apply modifier {modifier.name}: {e}")
 
-def apply_modifiers_keep_shapekeys_with_temp(obj):
-    """一時オブジェクトを使用してシェイプキーを維持しながらモディファイアを適用する"""
+def apply_modifiers_keep_shapekeys_evaluated(obj):
+    """evaluated mesh を使用してシェイプキーを維持しながらモディファイアを適用する
+
+    最適化版: bpy.ops.object.duplicate を回避し、foreach_get/foreach_set で一括処理
+    """
+    import time
+    start_time = time.perf_counter()
+
     if obj.type != 'MESH':
         return
-    
+
     if not obj.data.shape_keys:
         # シェイプキーがない場合は通常のモディファイア適用
         bpy.context.view_layer.objects.active = obj
@@ -14782,6 +14788,102 @@ def apply_modifiers_keep_shapekeys_with_temp(obj):
             except Exception as e:
                 print(f"Failed to apply modifier {modifier.name}: {e}")
         return
+
+    shape_keys = obj.data.shape_keys.key_blocks
+    num_shape_keys = len(shape_keys)
+    shape_key_data = {}  # {name: (coords_array, interpolation, value)}
+
+    print(f"  [Optimization] Using evaluated mesh for {obj.name} ({num_shape_keys} shape keys)")
+
+    # depsgraphを取得
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+
+    # 各シェイプキーの変形後頂点座標を取得
+    for i, shape_key in enumerate(shape_keys):
+        # シェイプキーの値を設定
+        for sk in shape_keys:
+            if i == 0:
+                # Basis: 全シェイプキー値を0に
+                sk.value = 0.0
+            else:
+                # 対象シェイプキーのみ1.0に
+                sk.value = 1.0 if sk.name == shape_key.name else 0.0
+
+        # depsgraphを更新
+        depsgraph.update()
+
+        # evaluated mesh から頂点座標を取得
+        evaluated_obj = obj.evaluated_get(depsgraph)
+        evaluated_mesh = evaluated_obj.to_mesh()
+
+        # foreach_get で一括取得
+        num_verts = len(evaluated_mesh.vertices)
+        coords = np.empty(num_verts * 3, dtype=np.float32)
+        evaluated_mesh.vertices.foreach_get("co", coords)
+
+        # メタデータと共に保存
+        shape_key_data[shape_key.name] = {
+            'coords': coords.reshape(-1, 3).copy(),
+            'interpolation': shape_key.interpolation if i > 0 else 'KEY_LINEAR',
+            'value': shape_key.value if shape_key.name == "SymmetricDeformed" else 0.0
+        }
+
+        # to_mesh() で作成したメッシュを解放
+        evaluated_obj.to_mesh_clear()
+
+    # シェイプキーを削除
+    obj.shape_key_clear()
+
+    # モディファイアを適用
+    bpy.context.view_layer.objects.active = obj
+    for modifier in obj.modifiers[:]:
+        try:
+            bpy.ops.object.modifier_apply(modifier=modifier.name)
+        except Exception as e:
+            print(f"Failed to apply modifier {modifier.name}: {e}")
+
+    # シェイプキーを再作成
+    for name, data in shape_key_data.items():
+        shape_key = obj.shape_key_add(name=name)
+        if name != "Basis":
+            shape_key.interpolation = data['interpolation']
+            if data['value'] > 0:
+                shape_key.value = data['value']
+
+        # foreach_set で一括設定
+        shape_key.data.foreach_set("co", data['coords'].flatten())
+
+    elapsed = time.perf_counter() - start_time
+    print(f"  [Optimization] Completed in {elapsed:.2f}s (evaluated mesh method)")
+
+
+# 最適化版を使用するかどうかのフラグ
+USE_EVALUATED_MESH_OPTIMIZATION = True
+
+
+def apply_modifiers_keep_shapekeys_with_temp(obj):
+    """一時オブジェクトを使用してシェイプキーを維持しながらモディファイアを適用する"""
+    # 最適化版を使用
+    if USE_EVALUATED_MESH_OPTIMIZATION:
+        return apply_modifiers_keep_shapekeys_evaluated(obj)
+
+    if obj.type != 'MESH':
+        return
+
+    if not obj.data.shape_keys:
+        # シェイプキーがない場合は通常のモディファイア適用
+        bpy.context.view_layer.objects.active = obj
+        for modifier in obj.modifiers:
+            try:
+                bpy.ops.object.modifier_apply(modifier=modifier.name)
+            except Exception as e:
+                print(f"Failed to apply modifier {modifier.name}: {e}")
+        return
+
+    # NOTE: 非Armatureモディファイアがない場合でもスキップ不可
+    # 理由: apply_modifiers() がArmature変形を頂点座標に焼き込む処理を行っており、
+    #       この処理をスキップすると品質劣化（座標誤差 e-01 オーダー）が発生する
+    # 検証日: 2024-12-31, 結果: 0/97 pass (baseline_data比較)
 
     # グローバルカウンタの初期化（存在しない場合）
     if not hasattr(apply_modifiers_keep_shapekeys_with_temp, 'counter'):
