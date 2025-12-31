@@ -14815,21 +14815,21 @@ def apply_modifiers_keep_shapekeys_evaluated(obj):
         # evaluated mesh から頂点座標を取得
         evaluated_obj = obj.evaluated_get(depsgraph)
         evaluated_mesh = evaluated_obj.to_mesh()
+        try:
+            # foreach_get で一括取得
+            num_verts = len(evaluated_mesh.vertices)
+            coords = np.empty(num_verts * 3, dtype=np.float32)
+            evaluated_mesh.vertices.foreach_get("co", coords)
 
-        # foreach_get で一括取得
-        num_verts = len(evaluated_mesh.vertices)
-        coords = np.empty(num_verts * 3, dtype=np.float32)
-        evaluated_mesh.vertices.foreach_get("co", coords)
-
-        # メタデータと共に保存
-        shape_key_data[shape_key.name] = {
-            'coords': coords.reshape(-1, 3).copy(),
-            'interpolation': shape_key.interpolation if i > 0 else 'KEY_LINEAR',
-            'value': shape_key.value if shape_key.name == "SymmetricDeformed" else 0.0
-        }
-
-        # to_mesh() で作成したメッシュを解放
-        evaluated_obj.to_mesh_clear()
+            # メタデータと共に保存
+            shape_key_data[shape_key.name] = {
+                'coords': coords.reshape(-1, 3).copy(),
+                'interpolation': shape_key.interpolation if i > 0 else 'KEY_LINEAR',
+                'value': shape_key.value if shape_key.name == "SymmetricDeformed" else 0.0
+            }
+        finally:
+            # to_mesh() で作成したメッシュを解放
+            evaluated_obj.to_mesh_clear()
 
     # シェイプキーを削除
     obj.shape_key_clear()
