@@ -20199,7 +20199,8 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
                 for key_block in obj.data.shape_keys.key_blocks:
                     print(f"Shape key: {key_block.name} / {key_block.value} found on {obj.name}")
 
-        # duplicate_mesh_with_partial_weights 呼び出し前に依存グラフを再更新
+        # find_containing_objects() が evaluated_get() を使用するため、依存グラフを更新
+        # NOTE: duplicate_mesh_with_partial_weights() 自体は evaluated_get() を使用しない
         bpy.context.view_layer.update()
 
         right_base_mesh, left_base_mesh = duplicate_mesh_with_partial_weights(base_mesh, base_avatar_data)
