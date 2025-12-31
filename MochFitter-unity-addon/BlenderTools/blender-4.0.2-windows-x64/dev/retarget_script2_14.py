@@ -12296,40 +12296,25 @@ def temporarily_merge_for_weight_transfer(container_obj, contained_objs, base_ar
     
     # 一時的なリストにすべてのオブジェクトを追加
     to_merge = [container_obj] + contained_objs
-    
-    # 頂点グループの情報を保存
-    vertex_groups_data = {}
-    for obj in to_merge:
-        vertex_groups_data[obj.name] = {}
-        for vg in obj.vertex_groups:
-            vg_data = []
-            for v in obj.data.vertices:
-                weight = 0.0
-                for g in v.groups:
-                    if g.group == vg.index:
-                        weight = g.weight
-                        break
-                if weight > 0:
-                    vg_data.append((v.index, weight))
-            vertex_groups_data[obj.name][vg.name] = vg_data
-    
-    # すべてのオブジェクトの複製を作成
+
+    # NOTE: 頂点グループの情報保存は不要（KDTreeベースの復元で代替済み）
+
+    # すべてのオブジェクトの複製を作成（最適化: obj.copy()使用）
     duplicated_objs = []
-    bpy.ops.object.select_all(action='DESELECT')
-    
     for obj in to_merge:
-        obj.select_set(True)
-        bpy.context.view_layer.objects.active = obj
-        bpy.ops.object.duplicate()
-        dup_obj = bpy.context.active_object
+        # メッシュデータをコピー
+        new_mesh = obj.data.copy()
+        # オブジェクトをコピー
+        dup_obj = obj.copy()
+        dup_obj.data = new_mesh
+        # シーンにリンク
+        bpy.context.collection.objects.link(dup_obj)
         duplicated_objs.append(dup_obj)
-        bpy.ops.object.select_all(action='DESELECT')
-    
-    # 複製したオブジェクトを結合
+
+    # 複製したオブジェクトを結合（bpy.ops.object.joinは低レベルAPI不在のため維持）
     bpy.ops.object.select_all(action='DESELECT')
     for obj in duplicated_objs:
         obj.select_set(True)
-    
     bpy.context.view_layer.objects.active = duplicated_objs[0]
     bpy.ops.object.join()
     
@@ -12348,11 +12333,15 @@ def temporarily_merge_for_weight_transfer(container_obj, contained_objs, base_ar
     eval_merged_mesh = eval_merged_obj.data
     merged_world_coords = get_mesh_vertices_world(eval_merged_mesh, merged_obj.matrix_world)
 
-    # KDTreeを使用して最も近い頂点を高速に検索
-    kdtree = KDTree(len(merged_world_coords))
-    for i, v_co in enumerate(merged_world_coords):
-        kdtree.insert(v_co, i)
-    kdtree.balance()
+    # cKDTreeを使用して最も近い頂点を高速に検索（バッチクエリ対応）
+    ckdtree = cKDTree(merged_world_coords)
+
+    # merged_objのウェイトデータを事前に構築（頂点アクセスを最小化）
+    merged_vg_index_to_name = {vg.index: vg.name for vg in merged_obj.vertex_groups}
+    merged_vertex_weights = []
+    for v in merged_obj.data.vertices:
+        weights = {merged_vg_index_to_name[g.group]: g.weight for g in v.groups if g.group in merged_vg_index_to_name}
+        merged_vertex_weights.append(weights)
 
     # 頂点グループの情報を元のオブジェクトに復元
     for obj in to_merge:
@@ -12361,29 +12350,39 @@ def temporarily_merge_for_weight_transfer(container_obj, contained_objs, base_ar
             obj.vertex_groups.remove(vg)
 
         # 結合オブジェクトから新しい頂点グループを作成
+        vg_name_to_obj = {}
         for vg in merged_obj.vertex_groups:
-            obj.vertex_groups.new(name=vg.name)
+            new_vg = obj.vertex_groups.new(name=vg.name)
+            vg_name_to_obj[vg.name] = new_vg
 
         # 評価済みの頂点座標を取得（現在の状態）
         eval_obj = obj.evaluated_get(depsgraph)
         eval_mesh = eval_obj.data
         obj_world_coords = get_mesh_vertices_world(eval_mesh, obj.matrix_world)
 
-        # 元のオブジェクトの各頂点に対して最も近い頂点を探し、ウェイトをコピー
-        for i, vert_co in enumerate(obj_world_coords):
-            co, merged_vert_idx, dist = kdtree.find(vert_co)
-            
-            # マージされたオブジェクト内の対応する頂点からウェイト情報をコピー
+        # バッチクエリで最近傍頂点を一括取得
+        _, nearest_indices = ckdtree.query(obj_world_coords, k=1)
+
+        # ウェイトをバッチ適用（グループごとにまとめて処理）
+        weight_assignments = {vg_name: [] for vg_name in vg_name_to_obj}
+        for i, merged_vert_idx in enumerate(nearest_indices):
             if merged_vert_idx >= 0:
-                for g in merged_obj.data.vertices[merged_vert_idx].groups:
-                    vg_name = merged_obj.vertex_groups[g.group].name
-                    if vg_name in obj.vertex_groups:
-                        obj.vertex_groups[vg_name].add([i], g.weight, 'REPLACE')
+                for vg_name, weight in merged_vertex_weights[merged_vert_idx].items():
+                    if vg_name in weight_assignments:
+                        weight_assignments[vg_name].append((i, weight))
+
+        # 各頂点グループに対してバッチ追加
+        for vg_name, assignments in weight_assignments.items():
+            if assignments:
+                vg = vg_name_to_obj[vg_name]
+                for vert_idx, weight in assignments:
+                    vg.add([vert_idx], weight, 'REPLACE')
     
-    # 一時的なオブジェクトを削除
-    bpy.ops.object.select_all(action='DESELECT')
-    merged_obj.select_set(True)
-    bpy.ops.object.delete()
+    # 一時的なオブジェクトを削除（最適化: bpy.data直接削除）
+    merged_mesh = merged_obj.data
+    bpy.data.objects.remove(merged_obj, do_unlink=True)
+    if merged_mesh and merged_mesh.users == 0:
+        bpy.data.meshes.remove(merged_mesh)
     
     # 元の選択状態を復元
     for obj, was_selected in original_selection.items():
@@ -16237,7 +16236,7 @@ def run_smoothing_processor(temp_file_path: str, multi_group: bool = False,
         
         print(f"スムージング処理を開始します...")
         print(f"実行コマンド: {' '.join(cmd)}")
-        
+
         # プロセスを実行
         process = subprocess.Popen(
             cmd,
@@ -16251,10 +16250,10 @@ def run_smoothing_processor(temp_file_path: str, multi_group: bool = False,
             bufsize=1,
             universal_newlines=True
         )
-        
+
         # リアルタイムで出力を読み取り
         output_lines = []
-        
+
         while True:
             line = process.stdout.readline()
             if not line and process.poll() is not None:
@@ -16263,12 +16262,12 @@ def run_smoothing_processor(temp_file_path: str, multi_group: bool = False,
                 line = line.rstrip('\n\r')
                 print(f"[スムージング処理] {line}")
                 output_lines.append(line)
-        
+
         # プロセスの完了を待つ
         process.wait()
         success = process.returncode == 0
         output = '\n'.join(output_lines)
-        
+
         if success:
             print("スムージング処理が正常に完了しました")
         else:
