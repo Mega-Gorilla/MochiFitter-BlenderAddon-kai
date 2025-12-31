@@ -20700,4 +20700,61 @@ def main():
         return False
 
 if __name__ == "__main__":
-    main()
+    # プロファイリングオプション: --profile 引数でプロファイリングを有効化
+    import sys
+    if "--profile" in sys.argv:
+        sys.argv.remove("--profile")
+        import cProfile
+        import pstats
+        import io
+        from pathlib import Path
+
+        print("=" * 60)
+        print("PROFILING ENABLED")
+        print("=" * 60)
+
+        profiler = cProfile.Profile()
+        profiler.enable()
+        try:
+            result = main()
+        finally:
+            profiler.disable()
+
+        # プロファイル結果を出力
+        print("\n" + "=" * 80)
+        print("PROFILING RESULTS - TOP 50 BY CUMULATIVE TIME")
+        print("=" * 80)
+        stats = pstats.Stats(profiler)
+        stats.sort_stats('cumulative')
+        stats.print_stats(50)
+
+        print("\n" + "=" * 80)
+        print("PROFILING RESULTS - TOP 50 BY TOTAL TIME (self)")
+        print("=" * 80)
+        stats.sort_stats('tottime')
+        stats.print_stats(50)
+
+        # ファイルに保存
+        output_dir = Path(__file__).parent / "profile_output"
+        output_dir.mkdir(exist_ok=True)
+        prof_file = output_dir / "profile_results.prof"
+        profiler.dump_stats(str(prof_file))
+        print(f"\nProfile data saved to: {prof_file}")
+
+        # 人間可読形式
+        txt_file = output_dir / "profile_results.txt"
+        with open(txt_file, "w", encoding="utf-8") as f:
+            f.write("PROFILING RESULTS - TOP 100 BY CUMULATIVE TIME\n")
+            f.write("=" * 80 + "\n\n")
+            stream = io.StringIO()
+            pstats.Stats(profiler, stream=stream).sort_stats('cumulative').print_stats(100)
+            f.write(stream.getvalue())
+
+            f.write("\n\nPROFILING RESULTS - TOP 100 BY TOTAL TIME (self)\n")
+            f.write("=" * 80 + "\n\n")
+            stream = io.StringIO()
+            pstats.Stats(profiler, stream=stream).sort_stats('tottime').print_stats(100)
+            f.write(stream.getvalue())
+        print(f"Human-readable results saved to: {txt_file}")
+    else:
+        main()

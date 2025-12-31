@@ -251,6 +251,9 @@ def build_command(config: dict, blender_path: Path, script_path: Path) -> list:
     if config.get('no_subdivision', False):
         cmd.append("--no-subdivision")
 
+    if config.get('profile', False):
+        cmd.append("--profile")
+
     return cmd
 
 
@@ -424,6 +427,11 @@ Examples:
         action="store_true",
         help="Suppress verbose output"
     )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Enable cProfile profiling (outputs to profile_output/)"
+    )
 
     args = parser.parse_args()
 
@@ -441,6 +449,11 @@ Examples:
         parser.print_help()
         print("\nError: Please specify --preset or --config")
         return 1
+
+    # Enable profiling if requested
+    if args.profile:
+        config['profile'] = True
+        print("PROFILING MODE ENABLED")
 
     # Run retarget
     print(f"Running: {config.get('description', 'custom config')}")
