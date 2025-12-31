@@ -20201,6 +20201,7 @@ def process_single_config(args, config_pair, pair_index, total_pairs, overall_st
 
         # find_containing_objects() が evaluated_get() を使用するため、依存グラフを更新
         # NOTE: duplicate_mesh_with_partial_weights() 自体は evaluated_get() を使用しない
+        # VERIFIED: view_layer.update() 削除テストの結果、品質劣化 (76/101→23/101) が確認されたため必須
         bpy.context.view_layer.update()
 
         right_base_mesh, left_base_mesh = duplicate_mesh_with_partial_weights(base_mesh, base_avatar_data)
