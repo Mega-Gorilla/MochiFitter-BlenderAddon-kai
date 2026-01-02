@@ -351,7 +351,7 @@ function Show-ProjectList {
     Write-Host ""
 
     do {
-        $selection = Read-Host "プロジェクトを選択してください (0-$($installableProjects.Count - 1))"
+        $selection = Read-Host "インストールするプロジェクトを選択してください (0-$($installableProjects.Count - 1))"
 
         if ($selection -eq 'q') {
             return $null
