@@ -10,8 +10,11 @@ param(
 
 # 設定
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $DllPath = Join-Path $ScriptDir "dist\MochiFitterPatcher.dll"
-$RetargetScriptSourcePath = Join-Path $ScriptDir "files\retarget_script2_14.py"
+
+# 最適化版ファイルのソースパス（リポジトリ内の MochFitter-unity-addon から参照）
+$RetargetScriptSourcePath = Join-Path $RepoRoot "MochFitter-unity-addon\BlenderTools\blender-4.0.2-windows-x64\dev\retarget_script2_14.py"
 
 # VCC 設定ファイルパス
 $VccSettingsPath = Join-Path $env:LOCALAPPDATA "VRChatCreatorCompanion\settings.json"

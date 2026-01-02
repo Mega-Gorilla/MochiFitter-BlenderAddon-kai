@@ -33,12 +33,17 @@ scripts/unity-addon-installer/
 ├── install.ps1              # メインインストーラーロジック
 ├── generate_patcher.py      # C# パッチャー DLL 生成スクリプト
 ├── test_patcher.ps1         # テストスイート
-├── files/
-│   └── retarget_script2_14.py  # 最適化版スクリプト（GPL）
 ├── build/
 │   └── MochiFitterPatcher.cs   # 生成された C# ソース
 └── dist/
     └── MochiFitterPatcher.dll  # コンパイル済みパッチャー
+
+# 最適化版ファイルの参照元（リポジトリ内）
+MochFitter-unity-addon/
+├── BlenderTools/blender-4.0.2-windows-x64/dev/
+│   └── retarget_script2_14.py  # retarget_script 最適化版（GPL）
+└── OutfitRetargetingSystem/Editor/
+    └── smoothing_processor.py  # パッチ適用対象
 ```
 
 ## DLL ビルド手順
