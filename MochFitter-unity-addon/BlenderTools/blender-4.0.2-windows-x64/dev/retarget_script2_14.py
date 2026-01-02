@@ -9424,8 +9424,7 @@ def apply_symmetric_field_delta(target_obj, field_data_path, blend_shape_labels=
             if blend_sk_name != shape_key_name:
                 print(f"Blending Basis-transition shape key '{blend_sk_name}' into Basis")
                 bpy.ops.mesh.blend_from_shape(shape=blend_sk_name, blend=1, add=True)
-                if blend_sk_name not in shape_keys_to_remove:
-                    shape_keys_to_remove.append(blend_sk_name)
+                # Note: 削除は既存のロジックに任せる（元のシェイプキーを誤って削除しないため）
 
     bpy.ops.object.mode_set(mode='OBJECT')
 
@@ -9987,6 +9986,24 @@ def apply_field_delta_with_rigid_transform(obj, field_data_path, blend_shape_lab
 
         bpy.context.object.active_shape_key_index = basis_index
         bpy.ops.mesh.blend_from_shape(shape=shape_key_name, blend=1, add=True)
+
+        # Issue #60: Basisトランジションで使用されたシェイプキー（Highheels等）をBasisにブレンド
+        # execute_transitions_with_cacheでシェイプキーDATAが変形後の値に修正されているが、
+        # シェイプキーVALUEは0.0のままなので、ブレンドしないと変形が失われる
+        if deferred_transitions:
+            basis_transition_shape_keys = set()
+            for transition_operation in transition_operations:
+                target_label = transition_operation['transition_data']['target_label']
+                source_sk_name = transition_operation.get('source_label_shape_key_name')
+                if target_label == 'Basis' and source_sk_name and source_sk_name != basis_name:
+                    if source_sk_name in obj.data.shape_keys.key_blocks:
+                        basis_transition_shape_keys.add(source_sk_name)
+
+            for blend_sk_name in basis_transition_shape_keys:
+                if blend_sk_name != shape_key_name:
+                    print(f"Blending Basis-transition shape key '{blend_sk_name}' into Basis (rigid)")
+                    bpy.ops.mesh.blend_from_shape(shape=blend_sk_name, blend=1, add=True)
+                    # Note: 削除は既存のロジックに任せる（元のシェイプキーを誤って削除しないため）
 
         bpy.ops.object.mode_set(mode='OBJECT')
 
