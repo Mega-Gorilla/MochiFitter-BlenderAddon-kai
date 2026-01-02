@@ -136,6 +136,7 @@ function Get-MochiFitterStatus {
         HasMochiFitter = $false
         SmoothingProcessorPath = $null
         SmoothingProcessorOptimized = $false
+        SmoothingProcessorPartial = $false      # 部分適用フラグ
         RetargetScriptPath = $null
         RetargetScriptOptimized = $false
         RetargetScriptVersion = $null           # 検出されたバージョン（例: "2_13", "2_14"）
@@ -150,10 +151,22 @@ function Get-MochiFitterStatus {
         $result.HasMochiFitter = $true
         $result.SmoothingProcessorPath = $smoothingPath
 
-        # 最適化マーカーを確認
+        # 最適化マーカーと適用状態を確認
         $content = Get-Content $smoothingPath -Raw -ErrorAction SilentlyContinue
         if ($content -and $content.Contains($OptimizationMarker)) {
-            $result.SmoothingProcessorOptimized = $true
+            # Patches Applied: X/Y を解析
+            if ($content -match "# Patches Applied: (\d+)/(\d+)") {
+                $applied = [int]$Matches[1]
+                $total = [int]$Matches[2]
+                if ($applied -eq $total) {
+                    $result.SmoothingProcessorOptimized = $true
+                } else {
+                    $result.SmoothingProcessorPartial = $true
+                }
+            } else {
+                # マーカーはあるがパッチ情報がない場合（古い形式）
+                $result.SmoothingProcessorOptimized = $true
+            }
         }
     }
 
@@ -266,10 +279,16 @@ function Show-ProjectList {
             $status = $proj.Status
 
             # ステータス判定
-            if ($status.SmoothingProcessorOptimized -and $status.RetargetScriptOptimized) {
+            # 完全インストール: 両方とも完全に最適化済み
+            $isFullyOptimized = $status.SmoothingProcessorOptimized -and $status.RetargetScriptOptimized
+            # 部分適用: どれかがパッチ適用中だが完全ではない、またはどちらか片方のみ最適化
+            $hasPartial = $status.SmoothingProcessorPartial -or
+                          ($status.SmoothingProcessorOptimized -xor $status.RetargetScriptOptimized)
+
+            if ($isFullyOptimized) {
                 $statusText = "[インストール済み]"
                 $statusColor = "Green"
-            } elseif ($status.SmoothingProcessorOptimized -or $status.RetargetScriptOptimized) {
+            } elseif ($hasPartial -or $status.SmoothingProcessorOptimized -or $status.RetargetScriptOptimized) {
                 $statusText = "[部分的に最適化]"
                 $statusColor = "DarkYellow"
             } else {
@@ -441,10 +460,11 @@ function Install-Optimization {
     }
 
     # 結果判定
-    if ($smoothingSuccess -or $retargetSuccess) {
-        return $true
+    # retarget_script がある場合は両方成功が必要、ない場合は smoothing のみで OK
+    if ($retargetPath) {
+        return ($smoothingSuccess -and $retargetSuccess)
     } else {
-        return $false
+        return $smoothingSuccess
     }
 }
 
@@ -517,10 +537,11 @@ function Uninstall-Optimization {
     }
 
     # 結果判定
-    if ($smoothingSuccess -or $retargetSuccess) {
-        return $true
+    # retarget_script がある場合は両方成功が必要、ない場合は smoothing のみで OK
+    if ($retargetPath) {
+        return ($smoothingSuccess -and $retargetSuccess)
     } else {
-        return $false
+        return $smoothingSuccess
     }
 }
 

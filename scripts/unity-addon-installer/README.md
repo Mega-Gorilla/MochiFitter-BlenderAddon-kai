@@ -72,7 +72,7 @@ certutil -hashfile dist\MochiFitterPatcher.dll SHA256
 
 **現在のDLLハッシュ (SHA256):**
 ```
-4ecfc5de55a946b523b845aa3ca77fd5c8dfdb3c9b833a046db2bfa2deffb140
+32ade77063ae70fc3606ac3561cb61380e75cf23a98dba26f8716882df6fd6e7
 ```
 
 ## テスト実行
@@ -104,7 +104,7 @@ cd scripts/unity-addon-installer
 
 ### パッチ適用ロジック
 
-1. **行末空白の正規化**: 行末の空白を削除してマッチング
+1. **完全一致マッチング**: オリジナルコードと完全一致した場合のみパッチ適用
 2. **部分適用の検出**: ヘッダーに `Patches Applied: X/Y` 形式で記録
 3. **再適用サポート**: 部分適用状態からの完全適用が可能
 

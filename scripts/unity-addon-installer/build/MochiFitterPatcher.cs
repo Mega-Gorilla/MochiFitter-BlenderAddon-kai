@@ -200,31 +200,42 @@ namespace MochiFitterKai
 
                 // パッチを適用（完全一致のみ）
                 string modifiedContent = content;
-                int appliedCount = 0;
+                int newlyAppliedCount = 0;      // 今回新たに適用したパッチ数
+                int alreadyAppliedCount = 0;    // 既に適用済みのパッチ数
 
                 foreach (var patch in Patches)
                 {
                     if (modifiedContent.Contains(patch.OriginalCode))
                     {
+                        // オリジナルコードが存在 → パッチを適用
                         modifiedContent = modifiedContent.Replace(
                             patch.OriginalCode,
                             patch.OptimizedCode
                         );
                         result.Messages.Add("パッチ適用: " + patch.Description);
                         result.AppliedPatchIds.Add(patch.PatchId);
-                        appliedCount++;
+                        newlyAppliedCount++;
+                    }
+                    else if (modifiedContent.Contains(patch.OptimizedCode))
+                    {
+                        // 最適化コードが存在 → 既に適用済み
+                        alreadyAppliedCount++;
                     }
                     else
                     {
+                        // どちらも存在しない → コードが変更されている
                         result.Messages.Add("パッチスキップ（コード不一致）: " + patch.Description);
                         result.SkippedPatchIds.Add(patch.PatchId);
                     }
                 }
 
-                // ヘッダーマーカーを追加（全パッチ適用時のみ完全適用マーカー）
-                if (appliedCount > 0)
+                // 合計適用数 = 今回適用 + 既に適用済み
+                int totalAppliedCount = newlyAppliedCount + alreadyAppliedCount;
+
+                // ヘッダーマーカーを追加（1つ以上適用されている場合）
+                if (totalAppliedCount > 0)
                 {
-                    string patchStatus = appliedCount.ToString() + "/" + TotalPatchCount.ToString();
+                    string patchStatus = totalAppliedCount.ToString() + "/" + TotalPatchCount.ToString();
                     string header = "# ============================================" + Environment.NewLine +
                         "# MochiFitter-Kai Optimized" + Environment.NewLine +
                         "# Version: " + Version + Environment.NewLine +
@@ -234,19 +245,22 @@ namespace MochiFitterKai
                     modifiedContent = header + modifiedContent;
                 }
 
-                // ファイルを書き込み
-                File.WriteAllText(filePath, modifiedContent, Encoding.UTF8);
+                // ファイルを書き込み（変更があった場合のみ）
+                if (newlyAppliedCount > 0 || (alreadyAppliedCount > 0 && !content.Contains(FullyAppliedMarker)))
+                {
+                    File.WriteAllText(filePath, modifiedContent, Encoding.UTF8);
+                }
 
-                result.Success = appliedCount > 0;
-                result.PatchesApplied = appliedCount;
+                result.Success = totalAppliedCount > 0;
+                result.PatchesApplied = totalAppliedCount;
 
-                if (appliedCount == 0)
+                if (totalAppliedCount == 0)
                 {
                     result.Error = "適用可能なパッチがありませんでした（コードが異なる可能性があります）";
                 }
-                else if (appliedCount < TotalPatchCount)
+                else if (totalAppliedCount < TotalPatchCount)
                 {
-                    result.Messages.Add("警告: 一部のパッチのみ適用されました (" + appliedCount.ToString() + "/" + TotalPatchCount.ToString() + ")");
+                    result.Messages.Add("警告: 一部のパッチのみ適用されました (" + totalAppliedCount.ToString() + "/" + TotalPatchCount.ToString() + ")");
                 }
             }
             catch (Exception ex)
