@@ -39,12 +39,17 @@ namespace MochiFitterKai
     {
         public bool Success { get; set; }
         public int PatchesApplied { get; set; }
+        public int TotalPatches { get; set; }
+        public List<string> AppliedPatchIds { get; set; }
+        public List<string> SkippedPatchIds { get; set; }
         public List<string> Messages { get; set; }
         public string Error { get; set; }
 
         public PatchResult()
         {
             Messages = new List<string>();
+            AppliedPatchIds = new List<string>();
+            SkippedPatchIds = new List<string>();
         }
     }
 
@@ -59,9 +64,19 @@ namespace MochiFitterKai
         public const string Version = "1.0.0";
 
         /// <summary>
+        /// 総パッチ数
+        /// </summary>
+        public const int TotalPatchCount = 2;
+
+        /// <summary>
         /// 最適化マーカー（ファイルヘッダー）
         /// </summary>
         private const string OptimizationMarker = "# MochiFitter-Kai Optimized";
+
+        /// <summary>
+        /// 完全適用マーカー
+        /// </summary>
+        private const string FullyAppliedMarker = "# Patches Applied: 2/2";
 
         /// <summary>
         /// パッチ定義リスト
@@ -85,6 +100,19 @@ namespace MochiFitterKai
         };
 
         /// <summary>
+        /// 行末空白を正規化（各行の末尾の空白を削除）
+        /// </summary>
+        private static string NormalizeTrailingWhitespace(string content)
+        {
+            string[] lines = content.Split(new[] { "\n" }, StringSplitOptions.None);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                lines[i] = lines[i].TrimEnd();
+            }
+            return string.Join("\n", lines);
+        }
+
+        /// <summary>
         /// ファイルがパッチ適用済みかどうかを確認
         /// </summary>
         /// <param name="filePath">smoothing_processor.py のパス</param>
@@ -106,6 +134,27 @@ namespace MochiFitterKai
         }
 
         /// <summary>
+        /// ファイルが完全にパッチ適用済みかどうかを確認
+        /// </summary>
+        /// <param name="filePath">smoothing_processor.py のパス</param>
+        /// <returns>全パッチ適用済みの場合 true</returns>
+        public static bool IsFullyPatched(string filePath)
+        {
+            if (!File.Exists(filePath))
+                return false;
+
+            try
+            {
+                string content = File.ReadAllText(filePath, Encoding.UTF8);
+                return content.Contains(FullyAppliedMarker);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// パッチを適用
         /// </summary>
         /// <param name="filePath">smoothing_processor.py のパス</param>
@@ -113,6 +162,7 @@ namespace MochiFitterKai
         public static PatchResult ApplyPatches(string filePath)
         {
             var result = new PatchResult();
+            result.TotalPatches = TotalPatchCount;
 
             if (!File.Exists(filePath))
             {
@@ -126,21 +176,43 @@ namespace MochiFitterKai
                 string content = File.ReadAllText(filePath, Encoding.UTF8);
 
                 // 改行コードを正規化（CRLF → LF）
-                // Windows環境でFile.ReadAllTextがCRLFに変換する場合があるため
                 content = content.Replace("\r\n", "\n").Replace("\r", "\n");
 
-                // 既にパッチ適用済みの場合
-                if (content.Contains(OptimizationMarker))
+                // 既に完全にパッチ適用済みの場合
+                if (content.Contains(FullyAppliedMarker))
                 {
                     result.Success = true;
-                    result.Messages.Add("既にパッチ適用済みです");
+                    result.PatchesApplied = TotalPatchCount;
+                    result.Messages.Add("既に全パッチ適用済みです");
                     return result;
                 }
 
-                // バックアップを作成
+                // 部分的に適用済みの場合は警告（ヘッダーがあるが完全適用ではない）
+                if (content.Contains(OptimizationMarker) && !content.Contains(FullyAppliedMarker))
+                {
+                    result.Messages.Add("警告: 部分的にパッチが適用されています。再適用を試みます...");
+                    // ヘッダーを削除して再適用を試みる
+                    int headerEnd = content.IndexOf("# ============================================\n",
+                        content.IndexOf(OptimizationMarker));
+                    if (headerEnd > 0)
+                    {
+                        headerEnd = content.IndexOf("\n", headerEnd) + 1;
+                        content = content.Substring(headerEnd);
+                    }
+                }
+
+                // バックアップを作成（まだ存在しない場合のみ）
                 string backupPath = filePath + ".bak";
-                File.Copy(filePath, backupPath, true);
-                result.Messages.Add("バックアップを作成: " + backupPath);
+                if (!File.Exists(backupPath))
+                {
+                    // オリジナルファイルを読み込んでバックアップ
+                    string originalContent = File.ReadAllText(filePath, Encoding.UTF8);
+                    File.WriteAllText(backupPath, originalContent, Encoding.UTF8);
+                    result.Messages.Add("バックアップを作成: " + backupPath);
+                }
+
+                // 行末空白を正規化したコンテンツを作成（マッチング用）
+                string normalizedContent = NormalizeTrailingWhitespace(content);
 
                 // パッチを適用
                 string modifiedContent = content;
@@ -148,28 +220,50 @@ namespace MochiFitterKai
 
                 foreach (var patch in Patches)
                 {
-                    if (modifiedContent.Contains(patch.OriginalCode))
+                    // 正規化されたパターンでマッチング
+                    string normalizedOriginal = NormalizeTrailingWhitespace(patch.OriginalCode);
+
+                    if (normalizedContent.Contains(normalizedOriginal))
                     {
-                        modifiedContent = modifiedContent.Replace(
-                            patch.OriginalCode,
-                            patch.OptimizedCode
-                        );
+                        // 元のコンテンツで置換を試みる
+                        if (modifiedContent.Contains(patch.OriginalCode))
+                        {
+                            modifiedContent = modifiedContent.Replace(
+                                patch.OriginalCode,
+                                patch.OptimizedCode
+                            );
+                        }
+                        else
+                        {
+                            // 正規化されたバージョンで置換
+                            modifiedContent = NormalizeTrailingWhitespace(modifiedContent);
+                            modifiedContent = modifiedContent.Replace(
+                                normalizedOriginal,
+                                patch.OptimizedCode
+                            );
+                        }
                         result.Messages.Add("パッチ適用: " + patch.Description);
+                        result.AppliedPatchIds.Add(patch.PatchId);
                         appliedCount++;
+
+                        // normalizedContentも更新
+                        normalizedContent = NormalizeTrailingWhitespace(modifiedContent);
                     }
                     else
                     {
                         result.Messages.Add("パッチスキップ（コード不一致）: " + patch.Description);
+                        result.SkippedPatchIds.Add(patch.PatchId);
                     }
                 }
 
-                // ヘッダーマーカーを追加
+                // ヘッダーマーカーを追加（全パッチ適用時のみ完全適用マーカー）
                 if (appliedCount > 0)
                 {
+                    string patchStatus = appliedCount.ToString() + "/" + TotalPatchCount.ToString();
                     string header = "# ============================================" + Environment.NewLine +
                         "# MochiFitter-Kai Optimized" + Environment.NewLine +
                         "# Version: " + Version + Environment.NewLine +
-                        "# Patches Applied: " + appliedCount.ToString() + Environment.NewLine +
+                        "# Patches Applied: " + patchStatus + Environment.NewLine +
                         "# DO NOT REMOVE THIS HEADER" + Environment.NewLine +
                         "# ============================================" + Environment.NewLine;
                     modifiedContent = header + modifiedContent;
@@ -184,6 +278,10 @@ namespace MochiFitterKai
                 if (appliedCount == 0)
                 {
                     result.Error = "適用可能なパッチがありませんでした（コードが異なる可能性があります）";
+                }
+                else if (appliedCount < TotalPatchCount)
+                {
+                    result.Messages.Add("警告: 一部のパッチのみ適用されました (" + appliedCount.ToString() + "/" + TotalPatchCount.ToString() + ")");
                 }
             }
             catch (Exception ex)
@@ -203,6 +301,7 @@ namespace MochiFitterKai
         public static PatchResult RemovePatches(string filePath)
         {
             var result = new PatchResult();
+            result.TotalPatches = TotalPatchCount;
 
             string backupPath = filePath + ".bak";
 
