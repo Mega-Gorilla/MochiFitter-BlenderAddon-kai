@@ -47,8 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Unity アドオン**: 最適化版で中心線上頂点の左右ウェイトが入れ替わる問題を修正 (Issue #60, PR #61)
-  - `temporarily_merge_for_weight_transfer` で cKDTree k=2 + 明示的タイブレーク方式を採用
-  - 同距離の頂点がある場合、小さいインデックスを優先して一貫性を確保
+  - `temporarily_merge_for_weight_transfer` で `query_ball_point` による完全なタイブレーク方式を採用
+  - 同距離の全候補を取得し、最小インデックスを選択（3点以上の同距離ケースにも対応）
   - 原因: cKDTree のタイブレーク動作が不定で、中心線上 (X≈0) の頂点が反対側のソース頂点とマッチする可能性があった
   - **注意**: `process_weight_transfer_with_component_normalization` の修正は別PRで対応予定
 - **Unity アドオン**: チェーン処理時のメモリ不足クラッシュを修正 (Issue #34, PR #35)

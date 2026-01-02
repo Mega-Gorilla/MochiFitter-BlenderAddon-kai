@@ -12365,23 +12365,20 @@ def temporarily_merge_for_weight_transfer(container_obj, contained_objs, base_ar
         eval_mesh = eval_obj.data
         obj_world_coords = get_mesh_vertices_world(eval_mesh, obj.matrix_world)
 
-        # k=2クエリで同距離時のタイブレークを明示的に処理
-        # (頂点が1つしかない場合はk=1にフォールバック)
-        k = min(2, len(merged_world_coords))
-        distances, indices = ckdtree.query(obj_world_coords, k=k)
+        # query_ball_pointで同距離候補を全取得し、最小インデックスを選択
+        # （3点以上が同距離のケースにも対応）
+        distances, indices = ckdtree.query(obj_world_coords, k=1)
         nearest_indices = []
-        if k == 1:
-            # 頂点が1つの場合はそのまま使用
-            nearest_indices = list(indices)
-        else:
-            for i in range(len(obj_world_coords)):
-                d0, d1 = distances[i]
-                i0, i1 = indices[i]
-                # 同距離（浮動小数点誤差考慮）の場合は小さいインデックス優先
-                if abs(d0 - d1) < 1e-10:
-                    nearest_indices.append(min(i0, i1))
-                else:
-                    nearest_indices.append(i0)
+        for i in range(len(obj_world_coords)):
+            min_dist = distances[i]
+            # 同距離の全候補を取得（浮動小数点誤差を考慮）
+            candidates = ckdtree.query_ball_point(obj_world_coords[i], min_dist + 1e-10)
+            if candidates:
+                # 最小インデックスを選択（Blender KDTreeと同じ動作）
+                nearest_indices.append(min(candidates))
+            else:
+                # フォールバック: k=1の結果を使用
+                nearest_indices.append(indices[i])
 
         # ウェイトをバッチ適用（グループごとにまとめて処理）
         weight_assignments = {vg_name: [] for vg_name in vg_name_to_obj}
