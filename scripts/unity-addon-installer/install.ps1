@@ -282,11 +282,9 @@ function Show-ProjectList {
             Write-Host $statusText -ForegroundColor $statusColor
             Write-Host "      $($proj.Path)" -ForegroundColor Gray
 
-            # 詳細情報
+            # 詳細情報（Blender 未設定の場合のみ表示）
             if (-not $status.RetargetScriptPath -and -not $status.BlenderVersion) {
                 Write-Host "      ⚠ Blender 未設定" -ForegroundColor DarkYellow
-            } elseif ($status.RetargetScriptVersion) {
-                Write-Host "      ✓ retarget_script$($status.RetargetScriptVersion).py" -ForegroundColor Gray
             }
         }
     }
@@ -305,7 +303,6 @@ function Show-ProjectList {
             Write-Host "$($proj.Name) " -NoNewline -ForegroundColor DarkGray
             Write-Host "[バージョン不一致]" -ForegroundColor Red
             Write-Host "      $($proj.Path)" -ForegroundColor DarkGray
-            Write-Host "      ✖ retarget_script$($status.RetargetScriptVersion).py (期待: $ExpectedRetargetScriptVersion)" -ForegroundColor Red
         }
 
         # エラー対処法を一度だけ表示
