@@ -11956,6 +11956,177 @@ def is_right_side_bone(bone_name: str, humanoid_name: str = None) -> bool:
     suffixes = ["_R", ".R", " R"]
     return any(cleaned_name.endswith(suffix) for suffix in suffixes)
 
+def get_lr_bone_counterpart(bone_name: str) -> str:
+    """
+    左ボーン名から対応する右ボーン名を取得、またはその逆
+
+    Parameters:
+        bone_name: ボーン名
+
+    Returns:
+        str: 対応するL/Rボーン名、見つからない場合はNone
+    """
+    # 末尾の数字を削除
+    cleaned = strip_numeric_suffix(bone_name)
+
+    # _L / _R パターン
+    if cleaned.endswith("_L"):
+        return cleaned[:-2] + "_R"
+    elif cleaned.endswith("_R"):
+        return cleaned[:-2] + "_L"
+
+    # .L / .R パターン
+    if cleaned.endswith(".L"):
+        return cleaned[:-2] + ".R"
+    elif cleaned.endswith(".R"):
+        return cleaned[:-2] + ".L"
+
+    # Left / Right パターン
+    if "Left" in cleaned:
+        return cleaned.replace("Left", "Right")
+    elif "Right" in cleaned:
+        return cleaned.replace("Right", "Left")
+
+    if "left" in cleaned:
+        return cleaned.replace("left", "right")
+    elif "right" in cleaned:
+        return cleaned.replace("right", "left")
+
+    return None
+
+def build_lr_bone_pairs(target_obj, base_avatar_data: dict) -> list:
+    """
+    ターゲットオブジェクトの頂点グループからL/Rボーンペアを構築
+
+    Parameters:
+        target_obj: ターゲットメッシュオブジェクト
+        base_avatar_data: ベースアバターデータ
+
+    Returns:
+        list: (left_bone, right_bone) タプルのリスト
+    """
+    pairs = []
+    seen = set()
+
+    # 既存の頂点グループ名を取得
+    vg_names = {vg.name for vg in target_obj.vertex_groups}
+
+    # humanoidBonesからL/Rペアを検出
+    for bone_map in base_avatar_data.get("humanoidBones", []):
+        bone_name = bone_map.get("boneName", "")
+        if bone_name not in vg_names:
+            continue
+
+        if is_left_side_bone(bone_name):
+            counterpart = get_lr_bone_counterpart(bone_name)
+            if counterpart and counterpart in vg_names:
+                pair = (bone_name, counterpart)
+                if pair not in seen:
+                    pairs.append(pair)
+                    seen.add(pair)
+        elif is_right_side_bone(bone_name):
+            counterpart = get_lr_bone_counterpart(bone_name)
+            if counterpart and counterpart in vg_names:
+                pair = (counterpart, bone_name)
+                if pair not in seen:
+                    pairs.append(pair)
+                    seen.add(pair)
+
+    # auxiliaryBonesからもペアを検出
+    for aux_set in base_avatar_data.get("auxiliaryBones", []):
+        for aux_bone in aux_set.get("auxiliaryBones", []):
+            if aux_bone not in vg_names:
+                continue
+
+            if is_left_side_bone(aux_bone):
+                counterpart = get_lr_bone_counterpart(aux_bone)
+                if counterpart and counterpart in vg_names:
+                    pair = (aux_bone, counterpart)
+                    if pair not in seen:
+                        pairs.append(pair)
+                        seen.add(pair)
+            elif is_right_side_bone(aux_bone):
+                counterpart = get_lr_bone_counterpart(aux_bone)
+                if counterpart and counterpart in vg_names:
+                    pair = (counterpart, aux_bone)
+                    if pair not in seen:
+                        pairs.append(pair)
+                        seen.add(pair)
+
+    return pairs
+
+def fix_centerline_lr_weight_swaps(target_obj, base_avatar_data: dict, x_threshold: float = 0.02):
+    """
+    中心線付近の頂点のL/Rウェイトスワップを修正
+
+    外部アドオン（robust_weight_transfer）のKDTreeタイブレーク問題により、
+    中心線付近の頂点（X≈0）で左右のウェイトが入れ替わることがある。
+    この関数は、頂点のX座標に基づいて不適切なL/Rウェイト割り当てを検出・修正する。
+
+    Issue #60 の一部として実装。
+
+    Parameters:
+        target_obj: ターゲットメッシュオブジェクト
+        base_avatar_data: ベースアバターデータ
+        x_threshold: 中心線とみなすX座標の閾値（デフォルト: 0.02）
+    """
+    # L/Rボーンペアを構築
+    lr_pairs = build_lr_bone_pairs(target_obj, base_avatar_data)
+
+    if not lr_pairs:
+        return
+
+    fixed_count = 0
+    epsilon = 0.001  # X座標の微小値
+    weight_diff_threshold = 0.001  # ウェイト差の閾値
+
+    for vert in target_obj.data.vertices:
+        # 中心線付近の頂点のみ処理（|X| < threshold）
+        if abs(vert.co.x) > x_threshold:
+            continue
+
+        x = vert.co.x
+
+        for left_bone, right_bone in lr_pairs:
+            left_group = target_obj.vertex_groups.get(left_bone)
+            right_group = target_obj.vertex_groups.get(right_bone)
+
+            if not left_group or not right_group:
+                continue
+
+            # 現在のウェイトを取得
+            left_weight = 0.0
+            right_weight = 0.0
+            for g in vert.groups:
+                if g.group == left_group.index:
+                    left_weight = g.weight
+                elif g.group == right_group.index:
+                    right_weight = g.weight
+
+            # ウェイトがない場合はスキップ
+            if left_weight < 0.001 and right_weight < 0.001:
+                continue
+
+            # スワップ検出:
+            # X > ε (左側) なのに Right > Left の場合、スワップの可能性
+            # X < -ε (右側) なのに Left > Right の場合、スワップの可能性
+            needs_swap = False
+            if x > epsilon and right_weight > left_weight + weight_diff_threshold:
+                # 左側にいるのに右ウェイトが大きい
+                needs_swap = True
+            elif x < -epsilon and left_weight > right_weight + weight_diff_threshold:
+                # 右側にいるのに左ウェイトが大きい
+                needs_swap = True
+
+            if needs_swap:
+                # ウェイトをスワップ
+                left_group.add([vert.index], right_weight, 'REPLACE')
+                right_group.add([vert.index], left_weight, 'REPLACE')
+                fixed_count += 1
+
+    if fixed_count > 0:
+        print(f"  中心線L/Rスワップ修正: {fixed_count}件")
+
 def duplicate_mesh_with_partial_weights(base_mesh: bpy.types.Object, base_avatar_data: dict) -> tuple:
     """
     素体メッシュを複製し左右の半身ウェイトを分離したものを作成
@@ -17725,7 +17896,14 @@ def process_weight_transfer(target_obj, armature, base_avatar_data, clothing_ava
         reset_bone_weights(target_obj, bone_groups)
         restore_weights(target_obj, all_weights)
         return
-    
+
+    # 中心線付近の頂点のL/Rウェイトスワップを修正 (Issue #60)
+    # 外部アドオン（robust_weight_transfer）のKDTreeタイブレーク問題への対策
+    lr_swap_fix_time_start = time.time()
+    fix_centerline_lr_weight_swaps(target_obj, base_avatar_data, x_threshold=0.02)
+    lr_swap_fix_time = time.time() - lr_swap_fix_time_start
+    print(f"  L/Rスワップ修正: {lr_swap_fix_time:.2f}秒")
+
     # MF_Armpitグループが存在し、0.001より大きいウェイトを持つ頂点があるかチェック
     mf_armpit_group = target_obj.vertex_groups.get("MF_Armpit")
     should_armpit_process = False
