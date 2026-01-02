@@ -398,10 +398,6 @@ function Install-Optimization {
 
                 $result = [MochiFitterKai.MochiFitterPatcher]::ApplyPatches($smoothingPath)
 
-                foreach ($msg in $result.Messages) {
-                    Write-InfoMessage $msg
-                }
-
                 if ($result.Success) {
                     Write-SuccessMessage "smoothing_processor.py: パッチ適用完了"
                     $smoothingSuccess = $true
@@ -481,10 +477,6 @@ function Uninstall-Optimization {
                 Add-Type -Path $DllPath -ErrorAction SilentlyContinue
 
                 $result = [MochiFitterKai.MochiFitterPatcher]::RemovePatches($smoothingPath)
-
-                foreach ($msg in $result.Messages) {
-                    Write-InfoMessage $msg
-                }
 
                 if ($result.Success) {
                     Write-SuccessMessage "smoothing_processor.py: 復元完了"
