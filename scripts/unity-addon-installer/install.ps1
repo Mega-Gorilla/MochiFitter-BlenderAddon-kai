@@ -21,7 +21,23 @@ $VccSettingsPath = Join-Path $env:LOCALAPPDATA "VRChatCreatorCompanion\settings.
 
 # 対象ファイルの相対パス
 $SmoothingProcessorRelPath = "Assets\OutfitRetargetingSystem\Editor\smoothing_processor.py"
-$RetargetScriptRelPath = "BlenderTools\blender-4.0.2-windows-x64\dev\retarget_script2_14.py"
+
+# ============================================
+# MochiFitter バージョン対応テーブル
+# ============================================
+# このインストーラーが対応する MochiFitter バージョン
+$SupportedMochiFitterVersion = "v34r"
+
+# retarget_script バージョン → MochiFitter バージョン対応表
+# 今後のバージョンアップ時はここに追加
+$RetargetScriptVersionMap = @{
+    "2_14" = "v34r"    # 現在サポート
+    "2_13" = "v33"     # 旧バージョン
+    "2_12" = "v32"     # 旧バージョン
+}
+
+# 期待する retarget_script バージョン（サポートバージョンから逆引き）
+$ExpectedRetargetScriptVersion = ($RetargetScriptVersionMap.GetEnumerator() | Where-Object { $_.Value -eq $SupportedMochiFitterVersion } | Select-Object -First 1).Key
 
 # 最適化マーカー
 $OptimizationMarker = "# MochiFitter-Kai Optimized"
@@ -122,6 +138,10 @@ function Get-MochiFitterStatus {
         SmoothingProcessorOptimized = $false
         RetargetScriptPath = $null
         RetargetScriptOptimized = $false
+        RetargetScriptVersion = $null           # 検出されたバージョン（例: "2_13", "2_14"）
+        RetargetScriptVersionMismatch = $false  # バージョン不一致フラグ
+        BlenderVersion = $null                  # 検出された Blender バージョン
+        DetectedMochiFitterVersion = $null      # 推定された MochiFitter バージョン
     }
 
     # smoothing_processor.py を検索
@@ -137,50 +157,49 @@ function Get-MochiFitterStatus {
         }
     }
 
-    # retarget_script2_14.py を検索（BlenderTools 内）
-    # 複数のバージョンパスをチェック
+    # retarget_script2_*.py を検索（BlenderTools 内）
+    # 複数の Blender バージョンパスをチェック
     $blenderVersions = @("4.0.2", "4.1.0", "4.2.0", "4.3.0", "4.3.2")
     foreach ($ver in $blenderVersions) {
-        $retargetPath = Join-Path $ProjectPath "BlenderTools\blender-$ver-windows-x64\dev\retarget_script2_14.py"
-        if (Test-Path $retargetPath) {
-            $result.RetargetScriptPath = $retargetPath
+        $devPath = Join-Path $ProjectPath "BlenderTools\blender-$ver-windows-x64\dev"
+        if (Test-Path $devPath) {
+            $result.BlenderVersion = $ver
 
-            $content = Get-Content $retargetPath -Raw -ErrorAction SilentlyContinue
-            if ($content -and $content.Contains($OptimizationMarker)) {
-                $result.RetargetScriptOptimized = $true
+            # retarget_script2_*.py パターンでファイルを検索
+            $retargetFiles = Get-ChildItem -Path $devPath -Filter "retarget_script2_*.py" -ErrorAction SilentlyContinue
+            if ($retargetFiles) {
+                # 最新（最大番号）のファイルを取得
+                $latestFile = $retargetFiles | Sort-Object Name -Descending | Select-Object -First 1
+                $result.RetargetScriptPath = $latestFile.FullName
+
+                # バージョン番号を抽出（例: retarget_script2_14.py → "2_14"）
+                if ($latestFile.Name -match "retarget_script(\d+_\d+)\.py") {
+                    $result.RetargetScriptVersion = $Matches[1]
+
+                    # バージョンマップから MochiFitter バージョンを推定
+                    if ($RetargetScriptVersionMap.ContainsKey($result.RetargetScriptVersion)) {
+                        $result.DetectedMochiFitterVersion = $RetargetScriptVersionMap[$result.RetargetScriptVersion]
+                    } else {
+                        $result.DetectedMochiFitterVersion = "不明"
+                    }
+
+                    # 期待するバージョンと比較
+                    if ($result.RetargetScriptVersion -ne $ExpectedRetargetScriptVersion) {
+                        $result.RetargetScriptVersionMismatch = $true
+                    }
+                }
+
+                # 最適化マーカーを確認
+                $content = Get-Content $latestFile.FullName -Raw -ErrorAction SilentlyContinue
+                if ($content -and $content.Contains($OptimizationMarker)) {
+                    $result.RetargetScriptOptimized = $true
+                }
             }
             break
         }
     }
 
     return $result
-}
-
-function Show-BlenderWarning {
-    <#
-    .SYNOPSIS
-    Blender 未設定警告を表示
-    #>
-    param([string]$ProjectPath)
-
-    Write-Host ""
-    Write-Host "┌─────────────────────────────────────────────────────────────┐" -ForegroundColor Yellow
-    Write-Host "│ [警告] $ProjectPath" -ForegroundColor Yellow
-    Write-Host "│                                                             │" -ForegroundColor Yellow
-    Write-Host "│ MochiFitter は検出されましたが、Blender 連携が未設定です。 │" -ForegroundColor Yellow
-    Write-Host "│                                                             │" -ForegroundColor Yellow
-    Write-Host "│ 以下の手順で設定を完了してください:                        │" -ForegroundColor Yellow
-    Write-Host "│ 1. Unity で該当プロジェクトを開く                          │" -ForegroundColor Yellow
-    Write-Host "│ 2. メニュー: Tools → MochiFitter                           │" -ForegroundColor Yellow
-    Write-Host "│ 3. MochiFitter ウィンドウで Blender Status が              │" -ForegroundColor Yellow
-    Write-Host "│    `"Installed`" になっていることを確認                      │" -ForegroundColor Yellow
-    Write-Host "│    (Not Installed の場合は Install ボタンをクリック)       │" -ForegroundColor Yellow
-    Write-Host "│                                                             │" -ForegroundColor Yellow
-    Write-Host "│ ※ Blender Status が Installed でない状態で最適化を適用     │" -ForegroundColor Yellow
-    Write-Host "│   すると、後から Blender をインストールした際に            │" -ForegroundColor Yellow
-    Write-Host "│   最適化が上書きされてしまいます。                         │" -ForegroundColor Yellow
-    Write-Host "└─────────────────────────────────────────────────────────────┘" -ForegroundColor Yellow
-    Write-Host ""
 }
 
 function Show-ProjectList {
@@ -190,13 +209,11 @@ function Show-ProjectList {
     #>
     param([array]$Projects)
 
-    Write-Host ""
-    Write-Host "検出されたプロジェクト:" -ForegroundColor White
-    Write-Host "------------------------" -ForegroundColor Gray
-
-    $validProjects = @()
-    $warningProjects = @()
-    $index = 0
+    # プロジェクトを分類
+    $installableProjects = @()
+    $incompatibleProjects = @()
+    $blenderNotSetupProjects = @()
+    $selectableIndex = 0
 
     foreach ($project in $Projects) {
         if (-not (Test-Path $project)) {
@@ -207,51 +224,128 @@ function Show-ProjectList {
         $projectName = Split-Path $project -Leaf
 
         if ($status.HasMochiFitter) {
-            # Blender 未設定警告の判定（OutfitRetargetingSystem あり、retarget_script なし）
-            if (-not $status.RetargetScriptPath) {
-                $warningProjects += $project
-            }
-
-            $validProjects += @{
-                Index = $index
-                Path = $project
-                Status = $status
-            }
-
-            # 両ファイルが最適化済みの場合のみ「インストール済み」
-            $isFullyOptimized = $status.SmoothingProcessorOptimized -and $status.RetargetScriptOptimized
-
-            $statusText = if ($isFullyOptimized) {
-                "[インストール済み]"
-            } elseif ($status.SmoothingProcessorOptimized -or $status.RetargetScriptOptimized) {
-                "[部分的に最適化]"
+            if ($status.RetargetScriptVersionMismatch) {
+                # バージョン不一致 → 互換性なし
+                $incompatibleProjects += @{
+                    Path = $project
+                    Name = $projectName
+                    Status = $status
+                }
+            } elseif (-not $status.RetargetScriptPath -and -not $status.BlenderVersion) {
+                # Blender 未設定 → 警告付きで選択可能
+                $blenderNotSetupProjects += $project
+                $installableProjects += @{
+                    Index = $selectableIndex
+                    Path = $project
+                    Name = $projectName
+                    Status = $status
+                }
+                $selectableIndex++
             } else {
-                "[未インストール]"
+                # 正常 → インストール可能
+                $installableProjects += @{
+                    Index = $selectableIndex
+                    Path = $project
+                    Name = $projectName
+                    Status = $status
+                }
+                $selectableIndex++
             }
-
-            $statusColor = if ($isFullyOptimized) { "Green" } elseif ($status.SmoothingProcessorOptimized -or $status.RetargetScriptOptimized) { "DarkYellow" } else { "Yellow" }
-
-            Write-Host "  [$index] " -NoNewline -ForegroundColor Cyan
-            Write-Host "$projectName " -NoNewline -ForegroundColor White
-            Write-Host $statusText -ForegroundColor $statusColor
-            Write-Host "      $project" -ForegroundColor Gray
-
-            # Blender 未設定の場合は警告マーク
-            if (-not $status.RetargetScriptPath) {
-                Write-Host "      ⚠ Blender 未設定" -ForegroundColor DarkYellow
-            }
-
-            $index++
         }
     }
 
-    # Blender 未設定警告を表示
-    foreach ($warnProject in $warningProjects) {
-        Show-BlenderWarning -ProjectPath $warnProject
+    # ========================================
+    # インストール可能なプロジェクト
+    # ========================================
+    if ($installableProjects.Count -gt 0) {
+        Write-Host ""
+        Write-Host "インストール可能なプロジェクト:" -ForegroundColor Green
+        Write-Host "--------------------------------" -ForegroundColor Gray
+
+        foreach ($proj in $installableProjects) {
+            $status = $proj.Status
+
+            # ステータス判定
+            if ($status.SmoothingProcessorOptimized -and $status.RetargetScriptOptimized) {
+                $statusText = "[インストール済み]"
+                $statusColor = "Green"
+            } elseif ($status.SmoothingProcessorOptimized -or $status.RetargetScriptOptimized) {
+                $statusText = "[部分的に最適化]"
+                $statusColor = "DarkYellow"
+            } else {
+                $statusText = "[未インストール]"
+                $statusColor = "Yellow"
+            }
+
+            Write-Host "  [$($proj.Index)] " -NoNewline -ForegroundColor Cyan
+            Write-Host "$($proj.Name) " -NoNewline -ForegroundColor White
+            Write-Host $statusText -ForegroundColor $statusColor
+            Write-Host "      $($proj.Path)" -ForegroundColor Gray
+
+            # 詳細情報
+            if (-not $status.RetargetScriptPath -and -not $status.BlenderVersion) {
+                Write-Host "      ⚠ Blender 未設定" -ForegroundColor DarkYellow
+            } elseif ($status.RetargetScriptVersion) {
+                Write-Host "      ✓ retarget_script$($status.RetargetScriptVersion).py" -ForegroundColor Gray
+            }
+        }
     }
 
-    if ($validProjects.Count -eq 0) {
-        Write-WarningMessage "MochiFitter がインストールされているプロジェクトが見つかりませんでした"
+    # ========================================
+    # 互換性のないプロジェクト（参考表示のみ）
+    # ========================================
+    if ($incompatibleProjects.Count -gt 0) {
+        Write-Host ""
+        Write-Host "互換性のないプロジェクト:" -ForegroundColor Red
+        Write-Host "-------------------------" -ForegroundColor Gray
+
+        foreach ($proj in $incompatibleProjects) {
+            $status = $proj.Status
+            Write-Host "  [-] " -NoNewline -ForegroundColor DarkGray
+            Write-Host "$($proj.Name) " -NoNewline -ForegroundColor DarkGray
+            Write-Host "[バージョン不一致]" -ForegroundColor Red
+            Write-Host "      $($proj.Path)" -ForegroundColor DarkGray
+            Write-Host "      ✖ retarget_script$($status.RetargetScriptVersion).py (期待: $ExpectedRetargetScriptVersion)" -ForegroundColor Red
+        }
+
+        # エラー対処法を一度だけ表示
+        Write-Host ""
+        Write-Host "┌─────────────────────────────────────────────────────────────┐" -ForegroundColor Red
+        Write-Host "│ [対処法] バージョン不一致のプロジェクトについて            │" -ForegroundColor Red
+        Write-Host "│                                                             │" -ForegroundColor Red
+        Write-Host "│ このインストーラーは MochiFitter $SupportedMochiFitterVersion 専用です。" -ForegroundColor Red
+        Write-Host "│                                                             │" -ForegroundColor Red
+        Write-Host "│ 1. BOOTH から MochiFitter $SupportedMochiFitterVersion をダウンロード" -ForegroundColor Red
+        Write-Host "│ 2. Unity プロジェクトで MochiFitter をアップデート         │" -ForegroundColor Red
+        Write-Host "│ 3. Tools → MochiFitter で Blender を再インストール         │" -ForegroundColor Red
+        Write-Host "│ 4. このインストーラーを再実行                              │" -ForegroundColor Red
+        Write-Host "└─────────────────────────────────────────────────────────────┘" -ForegroundColor Red
+    }
+
+    # ========================================
+    # Blender 未設定警告（一度だけ表示）
+    # ========================================
+    if ($blenderNotSetupProjects.Count -gt 0) {
+        Write-Host ""
+        Write-Host "┌─────────────────────────────────────────────────────────────┐" -ForegroundColor Yellow
+        Write-Host "│ [注意] Blender 未設定のプロジェクトがあります              │" -ForegroundColor Yellow
+        Write-Host "│                                                             │" -ForegroundColor Yellow
+        Write-Host "│ Blender 未設定のまま最適化を適用すると、後から Unity で    │" -ForegroundColor Yellow
+        Write-Host "│ Blender をインストールした際に上書きされる可能性があります。│" -ForegroundColor Yellow
+        Write-Host "│                                                             │" -ForegroundColor Yellow
+        Write-Host "│ 推奨手順:                                                   │" -ForegroundColor Yellow
+        Write-Host "│ 1. Unity で Tools → MochiFitter を開く                     │" -ForegroundColor Yellow
+        Write-Host "│ 2. Blender Status を Installed にする                      │" -ForegroundColor Yellow
+        Write-Host "│ 3. このインストーラーを再実行                              │" -ForegroundColor Yellow
+        Write-Host "└─────────────────────────────────────────────────────────────┘" -ForegroundColor Yellow
+    }
+
+    # ========================================
+    # 選択肢がない場合
+    # ========================================
+    if ($installableProjects.Count -eq 0) {
+        Write-Host ""
+        Write-WarningMessage "インストール可能なプロジェクトが見つかりませんでした"
         return $null
     }
 
@@ -260,7 +354,7 @@ function Show-ProjectList {
     Write-Host ""
 
     do {
-        $selection = Read-Host "プロジェクトを選択してください (0-$($validProjects.Count - 1))"
+        $selection = Read-Host "プロジェクトを選択してください (0-$($installableProjects.Count - 1))"
 
         if ($selection -eq 'q') {
             return $null
@@ -268,8 +362,8 @@ function Show-ProjectList {
 
         $selIndex = -1
         if ([int]::TryParse($selection, [ref]$selIndex)) {
-            if ($selIndex -ge 0 -and $selIndex -lt $validProjects.Count) {
-                return $validProjects[$selIndex]
+            if ($selIndex -ge 0 -and $selIndex -lt $installableProjects.Count) {
+                return $installableProjects[$selIndex]
             }
         }
 
@@ -474,6 +568,7 @@ Write-Host "  $($selected.Path)" -ForegroundColor Cyan
 Write-Host ""
 
 # インストール状態の判定
+# 注: バージョン不一致のプロジェクトは Show-ProjectList で除外済み
 $isFullyOptimized = $selected.Status.SmoothingProcessorOptimized -and $selected.Status.RetargetScriptOptimized
 $isPartiallyOptimized = $selected.Status.SmoothingProcessorOptimized -or $selected.Status.RetargetScriptOptimized
 
