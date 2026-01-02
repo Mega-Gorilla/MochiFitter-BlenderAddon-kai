@@ -12338,7 +12338,7 @@ def temporarily_merge_for_weight_transfer(container_obj, contained_objs, base_ar
     eval_merged_mesh = eval_merged_obj.data
     merged_world_coords = get_mesh_vertices_world(eval_merged_mesh, merged_obj.matrix_world)
 
-    # cKDTreeを使用（k=2で同距離時は小さいインデックス優先の明示的タイブレーク）
+    # cKDTreeを使用（query_ball_pointで同距離候補を全取得し最小インデックスを選択）
     ckdtree = cKDTree(merged_world_coords)
 
     # merged_objのウェイトデータを事前に構築（頂点アクセスを最小化）
@@ -12371,8 +12371,9 @@ def temporarily_merge_for_weight_transfer(container_obj, contained_objs, base_ar
         nearest_indices = []
         for i in range(len(obj_world_coords)):
             min_dist = distances[i]
-            # 同距離の全候補を取得（浮動小数点誤差を考慮）
-            candidates = ckdtree.query_ball_point(obj_world_coords[i], min_dist + 1e-10)
+            # 同距離の全候補を取得（相対許容値で大スケールにも対応）
+            tolerance = max(1e-10, min_dist * 1e-9)
+            candidates = ckdtree.query_ball_point(obj_world_coords[i], min_dist + tolerance)
             if candidates:
                 # 最小インデックスを選択（Blender KDTreeと同じ動作）
                 nearest_indices.append(min(candidates))
