@@ -26,14 +26,14 @@ $SmoothingProcessorRelPath = "Assets\OutfitRetargetingSystem\Editor\smoothing_pr
 # MochiFitter バージョン対応テーブル
 # ============================================
 # このインストーラーが対応する MochiFitter バージョン
-$SupportedMochiFitterVersion = "v34r"
+$SupportedMochiFitterVersion = "34r"
 
 # retarget_script バージョン → MochiFitter バージョン対応表
 # 今後のバージョンアップ時はここに追加
 $RetargetScriptVersionMap = @{
-    "2_14" = "v34r"    # 現在サポート
-    "2_13" = "v33"     # 旧バージョン
-    "2_12" = "v32"     # 旧バージョン
+    "2_14" = "34r"    # 現在サポート
+    "2_13" = "33"     # 旧バージョン
+    "2_12" = "32"     # 旧バージョン
 }
 
 # 期待する retarget_script バージョン（サポートバージョンから逆引き）
