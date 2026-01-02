@@ -10,6 +10,9 @@
 MochFitter-unity-addon/OutfitRetargetingSystem/Editor/
 MochFitter-unity-addon/OutfitRetargetingSystem/Outputs/
 
+# オリジナル MochiFitter v34r（差分比較用、有料コンテンツ）
+original_v34r/
+
 # BlenderTools/ は GPL v3 ライセンスのため公開OK
 
 # -------------------------------------------
