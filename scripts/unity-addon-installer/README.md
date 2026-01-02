@@ -72,7 +72,7 @@ certutil -hashfile dist\MochiFitterPatcher.dll SHA256
 
 **現在のDLLハッシュ (SHA256):**
 ```
-835ee95c7d51ae2ed45233f501af3b6cbf4148c9ca825142c92a28ce2ad5a6e2
+4ecfc5de55a946b523b845aa3ca77fd5c8dfdb3c9b833a046db2bfa2deffb140
 ```
 
 ## テスト実行

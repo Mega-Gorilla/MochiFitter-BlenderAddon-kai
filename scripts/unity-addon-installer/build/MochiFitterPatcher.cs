@@ -100,19 +100,6 @@ namespace MochiFitterKai
         };
 
         /// <summary>
-        /// 行末空白を正規化（各行の末尾の空白を削除）
-        /// </summary>
-        private static string NormalizeTrailingWhitespace(string content)
-        {
-            string[] lines = content.Split(new[] { "\n" }, StringSplitOptions.None);
-            for (int i = 0; i < lines.Length; i++)
-            {
-                lines[i] = lines[i].TrimEnd();
-            }
-            return string.Join("\n", lines);
-        }
-
-        /// <summary>
         /// ファイルがパッチ適用済みかどうかを確認
         /// </summary>
         /// <param name="filePath">smoothing_processor.py のパス</param>
@@ -211,43 +198,21 @@ namespace MochiFitterKai
                     result.Messages.Add("バックアップを作成: " + backupPath);
                 }
 
-                // 行末空白を正規化したコンテンツを作成（マッチング用）
-                string normalizedContent = NormalizeTrailingWhitespace(content);
-
-                // パッチを適用
+                // パッチを適用（完全一致のみ）
                 string modifiedContent = content;
                 int appliedCount = 0;
 
                 foreach (var patch in Patches)
                 {
-                    // 正規化されたパターンでマッチング
-                    string normalizedOriginal = NormalizeTrailingWhitespace(patch.OriginalCode);
-
-                    if (normalizedContent.Contains(normalizedOriginal))
+                    if (modifiedContent.Contains(patch.OriginalCode))
                     {
-                        // 元のコンテンツで置換を試みる
-                        if (modifiedContent.Contains(patch.OriginalCode))
-                        {
-                            modifiedContent = modifiedContent.Replace(
-                                patch.OriginalCode,
-                                patch.OptimizedCode
-                            );
-                        }
-                        else
-                        {
-                            // 正規化されたバージョンで置換
-                            modifiedContent = NormalizeTrailingWhitespace(modifiedContent);
-                            modifiedContent = modifiedContent.Replace(
-                                normalizedOriginal,
-                                patch.OptimizedCode
-                            );
-                        }
+                        modifiedContent = modifiedContent.Replace(
+                            patch.OriginalCode,
+                            patch.OptimizedCode
+                        );
                         result.Messages.Add("パッチ適用: " + patch.Description);
                         result.AppliedPatchIds.Add(patch.PatchId);
                         appliedCount++;
-
-                        // normalizedContentも更新
-                        normalizedContent = NormalizeTrailingWhitespace(modifiedContent);
                     }
                     else
                     {
