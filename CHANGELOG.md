@@ -7,27 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance (Issue #48)
+- **Unity アドオン**: retarget_script CPU最適化により **47%高速化** (340秒→180秒)
+  - PR #50: `foreach_get` + NumPy バッチ最適化
+  - PR #51: KDTree キャッシュ最適化
+  - PR #52: Numba JIT 距離計算（実験的）
+  - PR #53: 不要な numpy-to-Vector 変換の削除
+  - PR #54: `view_layer.update()` / `mesh.update()` 呼び出し最適化
+  - PR #55: Evaluated mesh API によるシェイプキー処理最適化
+  - PR #56: `temporarily_merge_for_weight_transfer` 最適化
+
+### Added
+- **Unity アドオン**: Blender 自動セットアップスクリプト `scripts/setup_blender.py` (PR #44)
+  - Blender 4.0.2〜4.3.2 の自動ダウンロード・インストール
+  - クロスプラットフォーム対応（Windows/Linux/macOS）
+- **Unity アドオン**: CLI ラッパー `run_retarget.py` の移植性向上 (PR #41)
+  - ハードコードパスを削除
+  - 環境変数による設定サポート
+
 ### Changed
-- **Unity アドオン**: RetargetContext クラスを導入（Phase 3.1 リファクタリング）
+- **Unity アドオン**: RetargetContext クラスを導入（Phase 3.1 リファクタリング, PR #43）
   - グローバル変数を dataclass ベースのコンテキストクラスに集約
   - 後方互換性のためエイリアスを維持
   - `clear_all_caches()` を `_context.clear_all_caches()` に委譲
-- **Unity アドオン**: `process_single_config()` を関数分離（Phase 3.2 リファクタリング）
+- **Unity アドオン**: `process_single_config()` を関数分離（Phase 3.2 リファクタリング, PR #45）
   - `print_config_details()`: 設定ファイル内容のデバッグ出力
   - `clean_mesh_invalid_vertices()`: 独立・非有限頂点の削除
   - `apply_sub_bone_overrides()` / `restore_bone_overrides()`: サブボーン上書き管理
   - `process_mesh_in_cycle1()`: Cycle1 メッシュ処理の抽出
   - `preprocess_for_export()`: FBXエクスポート前処理の抽出
   - `process_single_config()` が約820行→オーケストレーション関数に変換
+- **Unity アドオン**: コード品質改善 Phase 1 & 2 (Issue #36, PR #38, #39, #40)
+  - 重複関数の削除
+  - ハードコードオブジェクト名の修正
+  - 裸の `except:` を具体的な例外に修正
+  - BMesh メモリリークの修正（try/finally）
+  - マジックナンバーの定数化
+  - コメントアウトコードの削除
 
 ### Fixed
-- **Unity アドオン**: チェーン処理時のメモリ不足クラッシュを修正 (Issue #34)
+- **Unity アドオン**: チェーン処理時のメモリ不足クラッシュを修正 (Issue #34, PR #35)
   - `clear_all_caches()` 関数を追加（全グローバルキャッシュのクリア）
   - ペア処理間でキャッシュクリアを実行
   - `_deformation_field_cache` (NPZデータ、KDTree) の適切な解放
   - `bpy.data.orphans_purge()` による Blender 孤立データの解放
   - `gc.collect()` によるガベージコレクション強制実行
-- **Unity アドオン**: シェイプキー削除後のデータ整合性を確保 (Issue #46)
+- **Unity アドオン**: シェイプキー削除後のデータ整合性を確保 (Issue #46, PR #47)
   - `obj.data.update()` を追加（シェイプキー削除後のメッシュデータ同期）
   - `bpy.context.view_layer.update()` を追加（依存グラフ更新）
   - `evaluated_get()` が正しいデータを返すことを保証
