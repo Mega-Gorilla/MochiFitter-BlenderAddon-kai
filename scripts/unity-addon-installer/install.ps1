@@ -351,7 +351,7 @@ function Show-ProjectList {
     Write-Host ""
 
     do {
-        $selection = Read-Host "インストールするプロジェクトを選択してください (0-$($installableProjects.Count - 1))"
+        $selection = Read-Host "インストール/アンインストールするプロジェクトを選択 (0-$($installableProjects.Count - 1))"
 
         if ($selection -eq 'q') {
             return $null
@@ -562,46 +562,53 @@ $isFullyOptimized = $selected.Status.SmoothingProcessorOptimized -and $selected.
 $isPartiallyOptimized = $selected.Status.SmoothingProcessorOptimized -or $selected.Status.RetargetScriptOptimized
 
 # インストール/アンインストール実行
+# 実行モードの決定
+$doUninstall = $false
+
 if ($Uninstall) {
+    # -Uninstall フラグが指定された場合
     if (-not $isPartiallyOptimized) {
         Write-WarningMessage "このプロジェクトには最適化パッチが適用されていません"
         exit 0
     }
-
-    $confirm = Read-Host "最適化パッチをアンインストールしますか？ (y/N)"
+    $confirm = Read-Host "アンインストールしますか？ (y/N)"
     if ($confirm -ne 'y' -and $confirm -ne 'Y') {
         Write-InfoMessage "キャンセルしました"
         exit 0
     }
+    $doUninstall = $true
+} elseif ($isFullyOptimized) {
+    # 既に最適化済みの場合 → アンインストールを提案
+    Write-InfoMessage "このプロジェクトは既に最適化済みです"
+    $confirm = Read-Host "アンインストールしますか？ (y/N)"
+    if ($confirm -ne 'y' -and $confirm -ne 'Y') {
+        Write-InfoMessage "終了します"
+        exit 0
+    }
+    $doUninstall = $true
+} elseif ($isPartiallyOptimized) {
+    # 部分的に最適化済みの場合
+    Write-WarningMessage "このプロジェクトは部分的に最適化されています"
+    Write-InfoMessage "すべてのファイルに最適化を適用します"
+}
 
+# 実行
+if ($doUninstall) {
     $success = Uninstall-Optimization -ProjectPath $selected.Path -Status $selected.Status
 } else {
-    if ($isFullyOptimized) {
-        Write-WarningMessage "このプロジェクトは既に最適化済みです"
-
-        $confirm = Read-Host "再インストールしますか？ (y/N)"
-        if ($confirm -ne 'y' -and $confirm -ne 'Y') {
-            Write-InfoMessage "終了します"
-            exit 0
-        }
-    } elseif ($isPartiallyOptimized) {
-        Write-WarningMessage "このプロジェクトは部分的に最適化されています"
-        Write-InfoMessage "すべてのファイルに最適化を適用します"
-    }
-
     $success = Install-Optimization -ProjectPath $selected.Path -Status $selected.Status
 }
 
 Write-Host ""
 if ($success) {
-    if ($Uninstall) {
+    if ($doUninstall) {
         Write-SuccessMessage "アンインストールが完了しました"
     } else {
         Write-SuccessMessage "インストールが完了しました"
     }
     exit 0
 } else {
-    if ($Uninstall) {
+    if ($doUninstall) {
         Write-ErrorMessage "アンインストールに失敗しました"
     } else {
         Write-ErrorMessage "インストールに失敗しました"
