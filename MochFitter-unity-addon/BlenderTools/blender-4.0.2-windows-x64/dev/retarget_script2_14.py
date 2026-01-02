@@ -1,4 +1,9 @@
 ﻿# -*- coding: utf-8 -*-
+# ============================================
+# MochiFitter-Kai Optimized
+# Version: 1.0.0
+# DO NOT REMOVE THIS HEADER
+# ============================================
 """
 retarget_script2_14.py - Blender Retargeting Script for Unity Outfit Retargeting System
 
