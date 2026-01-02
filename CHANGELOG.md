@@ -46,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - コメントアウトコードの削除
 
 ### Fixed
+- **Unity アドオン**: 最適化版で中心線上頂点の左右ウェイトが入れ替わる問題を修正 (Issue #60)
+  - `temporarily_merge_for_weight_transfer` で scipy の `cKDTree` を Blender `KDTree` に戻す
+  - 原因: cKDTree と Blender KDTree のタイブレーク動作の違い
+  - 中心線上 (X≈0) の頂点が反対側のソース頂点とマッチしていた
 - **Unity アドオン**: チェーン処理時のメモリ不足クラッシュを修正 (Issue #34, PR #35)
   - `clear_all_caches()` 関数を追加（全グローバルキャッシュのクリア）
   - ペア処理間でキャッシュクリアを実行

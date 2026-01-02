@@ -12338,8 +12338,11 @@ def temporarily_merge_for_weight_transfer(container_obj, contained_objs, base_ar
     eval_merged_mesh = eval_merged_obj.data
     merged_world_coords = get_mesh_vertices_world(eval_merged_mesh, merged_obj.matrix_world)
 
-    # cKDTreeを使用して最も近い頂点を高速に検索（バッチクエリ対応）
-    ckdtree = cKDTree(merged_world_coords)
+    # Blender KDTreeを使用（cKDTreeはタイブレーク動作が異なり中心線頂点で左右入れ替えが発生する）
+    kdtree = KDTree(len(merged_world_coords))
+    for i, v_co in enumerate(merged_world_coords):
+        kdtree.insert(v_co, i)
+    kdtree.balance()
 
     # merged_objのウェイトデータを事前に構築（頂点アクセスを最小化）
     merged_vg_index_to_name = {vg.index: vg.name for vg in merged_obj.vertex_groups}
@@ -12365,8 +12368,11 @@ def temporarily_merge_for_weight_transfer(container_obj, contained_objs, base_ar
         eval_mesh = eval_obj.data
         obj_world_coords = get_mesh_vertices_world(eval_mesh, obj.matrix_world)
 
-        # バッチクエリで最近傍頂点を一括取得
-        _, nearest_indices = ckdtree.query(obj_world_coords, k=1)
+        # Blender KDTreeで最近傍頂点を検索（順次クエリ）
+        nearest_indices = []
+        for co in obj_world_coords:
+            _, merged_vert_idx, _ = kdtree.find(co)
+            nearest_indices.append(merged_vert_idx)
 
         # ウェイトをバッチ適用（グループごとにまとめて処理）
         weight_assignments = {vg_name: [] for vg_name in vg_name_to_obj}
