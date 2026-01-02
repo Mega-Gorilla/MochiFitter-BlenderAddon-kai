@@ -15914,6 +15914,78 @@ def get_smoothing_processor_script_path():
     return script_path
 
 
+# smoothing_processor モジュールのキャッシュ
+_smoothing_processor_module = None
+
+
+def get_smoothing_processor_module():
+    """
+    smoothing_processor.py をモジュールとして import する
+
+    Returns:
+        module: smoothing_processor モジュール、または None（失敗時）
+
+    Note:
+        - 一度 import したモジュールはキャッシュされる
+        - sys.path への重複追加を防止
+        - 例外時は詳細なログを出力
+    """
+    global _smoothing_processor_module
+
+    # キャッシュがあれば返す
+    if _smoothing_processor_module is not None:
+        return _smoothing_processor_module
+
+    try:
+        # スクリプトパスを取得
+        script_path = get_smoothing_processor_script_path()
+        if script_path is None:
+            print("[get_smoothing_processor_module] エラー: スクリプトパスが見つかりません")
+            return None
+
+        # ディレクトリパスを取得
+        script_dir = os.path.dirname(os.path.abspath(script_path))
+
+        # sys.path に追加（重複回避）
+        if script_dir not in sys.path:
+            sys.path.insert(0, script_dir)
+            print(f"[get_smoothing_processor_module] sys.path に追加: {script_dir}")
+        else:
+            print(f"[get_smoothing_processor_module] sys.path に既存: {script_dir}")
+
+        # モジュールを import
+        import importlib
+        import importlib.util
+
+        # モジュールスペックを作成
+        spec = importlib.util.spec_from_file_location("smoothing_processor", script_path)
+        if spec is None:
+            print(f"[get_smoothing_processor_module] エラー: モジュールスペック作成失敗: {script_path}")
+            return None
+
+        # モジュールをロード
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["smoothing_processor"] = module
+        spec.loader.exec_module(module)
+
+        # キャッシュに保存
+        _smoothing_processor_module = module
+        print(f"[get_smoothing_processor_module] モジュール import 成功: {script_path}")
+
+        return module
+
+    except ImportError as e:
+        print(f"[get_smoothing_processor_module] ImportError: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+    except Exception as e:
+        print(f"[get_smoothing_processor_module] 予期しないエラー: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 def get_blender_python_user_site_packages(python_path=None):
     """BlenderのPythonのユーザーサイトパッケージパスを取得"""
     if python_path is None:
@@ -16281,6 +16353,144 @@ def run_smoothing_processor(temp_file_path: str, multi_group: bool = False,
         import traceback
         traceback.print_exc()
         return False, "", error_msg
+
+
+def run_smoothing_processor_inprocess(
+    vertex_coords: np.ndarray,
+    groups_data: List[Dict[str, Any]],
+    mask_weights: Optional[np.ndarray],
+    smoothing_radius: float,
+    target_group_iteration: int,
+    use_distance_weighting: bool,
+    gaussian_falloff: bool,
+    first_group_name: Optional[str] = None,
+    first_group_weights: Optional[np.ndarray] = None,
+    first_group_iteration: int = 1,
+    max_workers: Optional[int] = None
+) -> Tuple[bool, Dict[str, Dict[str, Any]]]:
+    """
+    smoothing_processor のコア関数を in-process で直接呼び出す
+
+    subprocess を使用せず、同一プロセス内で処理を実行することで、
+    プロセス間通信とファイル I/O のオーバーヘッドを削減する。
+
+    Parameters:
+        vertex_coords: 頂点座標のnumpy配列 (N, 3)
+        groups_data: 頂点グループデータのリスト
+                     [{'group_name': str, 'original_weights': np.ndarray}, ...]
+        mask_weights: マスクウェイト（追加グループ用、合成に使用）
+        smoothing_radius: スムージング半径
+        target_group_iteration: 追加グループのイテレーション回数
+        use_distance_weighting: 距離重み付けを使用するか
+        gaussian_falloff: ガウシアン減衰を使用するか
+        first_group_name: 最初のグループ名（マスクなしスムージング用）
+        first_group_weights: 最初のグループのウェイト
+        first_group_iteration: 最初のグループのイテレーション回数
+        max_workers: 最大ワーカー数
+
+    Returns:
+        tuple: (success: bool, results: Dict[str, Dict[str, Any]])
+               results = {group_name: {'final_weights': np.ndarray, 'skipped': bool}, ...}
+    """
+    try:
+        start_time = time.time()
+        print("[in-process] スムージング処理を開始...")
+
+        # smoothing_processor モジュールを取得
+        sp_module = get_smoothing_processor_module()
+        if sp_module is None:
+            print("[in-process] エラー: smoothing_processor モジュールの取得に失敗")
+            return False, {}
+
+        # ワーカー数の設定
+        if max_workers is None:
+            max_workers = os.cpu_count() - 1
+        if max_workers < 1:
+            max_workers = 1
+
+        results = {}
+
+        # === first_group の処理（マスクなしスムージング） ===
+        if first_group_name is not None and first_group_weights is not None:
+            print(f"[in-process] 最初のグループ '{first_group_name}' を処理中...")
+
+            if np.any(first_group_weights > 0):
+                # cKDTree を構築
+                from scipy.spatial import cKDTree
+                kdtree = cKDTree(vertex_coords)
+
+                smoothed_weights = np.copy(first_group_weights)
+
+                for iter_idx in range(first_group_iteration):
+                    smoothed_weights = sp_module.apply_smoothing_sequential(
+                        vertex_coords=vertex_coords,
+                        current_weights=smoothed_weights,
+                        kdtree=kdtree,
+                        smoothing_radius=smoothing_radius,
+                        use_distance_weighting=use_distance_weighting,
+                        gaussian_falloff=gaussian_falloff
+                    )
+
+                results[first_group_name] = {
+                    'final_weights': smoothed_weights,
+                    'smoothed_weights': smoothed_weights,
+                    'skipped': False
+                }
+                print(f"[in-process] 最初のグループ処理完了")
+            else:
+                results[first_group_name] = {
+                    'final_weights': first_group_weights.copy(),
+                    'smoothed_weights': first_group_weights.copy(),
+                    'skipped': True
+                }
+                print(f"[in-process] 最初のグループはスキップ（全ウェイト0）")
+
+        # === target_groups の並列処理（マスク付きスムージング） ===
+        if groups_data:
+            print(f"[in-process] 追加グループを処理中 ({len(groups_data)}グループ)...")
+
+            # マスクウェイトの計算
+            final_mask_weights = None
+
+            if first_group_name is not None and first_group_name in results:
+                first_group_smoothed = results[first_group_name]['smoothed_weights']
+
+                if mask_weights is not None:
+                    # mask_weights と first_group のスムージング結果を掛け合わせる
+                    final_mask_weights = first_group_smoothed * mask_weights
+                    print(f"[in-process] マスクウェイト: first_group のスムージング結果をマスク")
+                else:
+                    final_mask_weights = first_group_smoothed
+                    print(f"[in-process] マスクウェイト: first_group のスムージング結果を使用")
+            elif mask_weights is not None:
+                final_mask_weights = mask_weights
+                print(f"[in-process] マスクウェイト: 入力されたmask_weightsを使用")
+
+            # process_multiple_vertex_groups を呼び出し
+            target_results = sp_module.process_multiple_vertex_groups(
+                vertex_coords=vertex_coords,
+                groups_data=groups_data,
+                mask_weights=final_mask_weights,
+                smoothing_radius=smoothing_radius,
+                iteration=target_group_iteration,
+                use_distance_weighting=use_distance_weighting,
+                gaussian_falloff=gaussian_falloff,
+                max_workers=max_workers
+            )
+
+            # 結果をマージ
+            results.update(target_results)
+
+        elapsed_time = time.time() - start_time
+        print(f"[in-process] スムージング処理完了: {elapsed_time:.2f}秒")
+
+        return True, results
+
+    except Exception as e:
+        print(f"[in-process] エラー: {e}")
+        import traceback
+        traceback.print_exc()
+        return False, {}
 
 
 def export_multi_group_smoothing_data(cloth_obj, vertex_coords: np.ndarray,
@@ -16744,10 +16954,10 @@ def clear_mesh_cache():
     _mesh_cache.clear()
     print("メッシュキャッシュをクリアしました")
 
-def apply_distance_normal_based_smoothing(body_obj, cloth_obj, distance_min=0.0, distance_max=0.1, angle_min=0.0, angle_max=30.0, new_group_name="InpaintMask", normal_radius=0.01, smoothing_mask_groups=None, target_vertex_groups=None, smoothing_radius=0.02, mask_group_name=None):
+def apply_distance_normal_based_smoothing(body_obj, cloth_obj, distance_min=0.0, distance_max=0.1, angle_min=0.0, angle_max=30.0, new_group_name="InpaintMask", normal_radius=0.01, smoothing_mask_groups=None, target_vertex_groups=None, smoothing_radius=0.02, mask_group_name=None, use_inprocess=False):
     """
     素体メッシュからの距離と法線角度に基づいて衣装メッシュに頂点グループを作成し、スムージングを適用します
-    
+
     Parameters:
     body_obj (obj): 素体メッシュのオブジェクト名
     cloth_obj (obj): 衣装メッシュのオブジェクト名
@@ -16761,6 +16971,7 @@ def apply_distance_normal_based_smoothing(body_obj, cloth_obj, distance_min=0.0,
     target_vertex_groups (list): スムージング対象の頂点グループ名のリスト
     smoothing_radius (float): スムージングに使用する距離
     mask_group_name (str): スムージング処理結果の合成強度に対するマスク頂点グループの名前
+    use_inprocess (bool): Trueの場合、in-processでスムージング処理を実行（subprocess不使用）
     """
     start_time = time.time()
     
@@ -17066,58 +17277,114 @@ def apply_distance_normal_based_smoothing(body_obj, cloth_obj, distance_min=0.0,
         smoothing_mask_weights = np.clip(smoothing_mask_weights, 0.0, 1.0)
     
     neighbors_cache_result = None  # フォールバック用
-    
-    # 頂点数が1000以上の場合のみ外部スクリプトを使用
+
+    # 頂点数が1000以上の場合のみ外部スクリプト/in-processを使用
     use_external_script = len(vertex_coords) >= 1000
-    
+
     if use_external_script:
-        print("  外部スクリプトによるスムージング処理を開始...")
-        
-        # データをエクスポート（first_groupと追加グループを一括処理）
-        temp_file = export_multi_group_smoothing_data(
-            cloth_obj=cloth_obj,
-            vertex_coords=vertex_coords,
-            target_vertex_groups=valid_target_groups,
-            mask_weights=smoothing_mask_weights,  # smoothing_mask_groupsの合計ウェイト
-            smoothing_radius=smoothing_radius,
-            target_group_iteration=3,  # 追加グループのイテレーション
-            use_distance_weighting=True,
-            gaussian_falloff=True,
-            first_group_name=new_group_name,
-            first_group_weights=first_group_weights,
-            first_group_iteration=1  # first_groupのイテレーション
-        )
-        
-        # 外部スクリプトで一括処理を実行
-        success, output, error = run_smoothing_processor(
-            temp_file_path=temp_file,
-            multi_group=True,
-            max_workers=os.cpu_count() - 1
-        )
+        if use_inprocess:
+            # === in-process モード ===
+            print("  in-processスムージング処理を開始...")
+
+            # groups_data を準備
+            num_vertices = len(vertex_coords)
+            groups_data = []
+            for group_name in valid_target_groups:
+                if group_name not in cloth_obj.vertex_groups:
+                    continue
+                target_group = cloth_obj.vertex_groups[group_name]
+                original_weights = np.zeros(num_vertices, dtype=np.float32)
+                for i, vertex in enumerate(cloth_obj.data.vertices):
+                    for group in vertex.groups:
+                        if group.group == target_group.index:
+                            original_weights[i] = group.weight
+                            break
+                groups_data.append({
+                    'group_name': group_name,
+                    'original_weights': original_weights
+                })
+
+            # in-processでスムージング処理を実行
+            success, inprocess_results = run_smoothing_processor_inprocess(
+                vertex_coords=vertex_coords,
+                groups_data=groups_data,
+                mask_weights=smoothing_mask_weights,
+                smoothing_radius=smoothing_radius,
+                target_group_iteration=3,
+                use_distance_weighting=True,
+                gaussian_falloff=True,
+                first_group_name=new_group_name,
+                first_group_weights=first_group_weights,
+                first_group_iteration=1,
+                max_workers=os.cpu_count() - 1
+            )
+
+            if success:
+                # 結果を頂点グループに適用
+                for group_name, result_data in inprocess_results.items():
+                    if result_data.get('skipped', False):
+                        print(f"  グループ '{group_name}' はスキップされました")
+                        continue
+                    final_weights = result_data.get('final_weights')
+                    if final_weights is not None and group_name in cloth_obj.vertex_groups:
+                        target_group = cloth_obj.vertex_groups[group_name]
+                        for i in range(len(final_weights)):
+                            target_group.add([i], float(final_weights[i]), 'REPLACE')
+                        print(f"  グループ '{group_name}' のウェイトを適用しました")
+
+            temp_file = None  # in-processでは一時ファイルなし
+
+        else:
+            # === subprocess モード（従来方式） ===
+            print("  外部スクリプトによるスムージング処理を開始...")
+
+            # データをエクスポート（first_groupと追加グループを一括処理）
+            temp_file = export_multi_group_smoothing_data(
+                cloth_obj=cloth_obj,
+                vertex_coords=vertex_coords,
+                target_vertex_groups=valid_target_groups,
+                mask_weights=smoothing_mask_weights,  # smoothing_mask_groupsの合計ウェイト
+                smoothing_radius=smoothing_radius,
+                target_group_iteration=3,  # 追加グループのイテレーション
+                use_distance_weighting=True,
+                gaussian_falloff=True,
+                first_group_name=new_group_name,
+                first_group_weights=first_group_weights,
+                first_group_iteration=1  # first_groupのイテレーション
+            )
+
+            # 外部スクリプトで一括処理を実行
+            success, output, error = run_smoothing_processor(
+                temp_file_path=temp_file,
+                multi_group=True,
+                max_workers=os.cpu_count() - 1
+            )
+
+            if success:
+                # 結果ファイルのパスを生成
+                result_file = temp_file.replace('.npz', '_result.npz')
+
+                # 結果をインポートして適用
+                import_multi_group_smoothing_results(cloth_obj, result_file)
+
+                # 一時ファイルを削除
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                    if os.path.exists(result_file):
+                        os.remove(result_file)
+                except Exception as e:
+                    print(f"  警告: 一時ファイルの削除に失敗: {e}")
+
     else:
-        print(f"  頂点数が3000未満({len(vertex_coords)}頂点)のため、フォールバック処理を使用します...")
+        print(f"  頂点数が1000未満({len(vertex_coords)}頂点)のため、フォールバック処理を使用します...")
         success = False  # フォールバック処理を実行させる
         temp_file = None
-    
-    if success:
-        # 結果ファイルのパスを生成
-        result_file = temp_file.replace('.npz', '_result.npz')
-        
-        # 結果をインポートして適用
-        import_multi_group_smoothing_results(cloth_obj, result_file)
-        
-        # 一時ファイルを削除
-        try:
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-            if os.path.exists(result_file):
-                os.remove(result_file)
-        except Exception as e:
-            print(f"  警告: 一時ファイルの削除に失敗: {e}")
-    else:
+
+    if not success:
         # フォールバック処理を実行
         if use_external_script:
-            print(f"  外部スクリプト処理に失敗しました。フォールバック処理を実行します...")
+            print(f"  スムージング処理に失敗しました。フォールバック処理を実行します...")
         
         # first_groupのスムージング（従来の処理）
         print("  新しく作成された頂点グループのスムージング処理適用中...")
