@@ -164,8 +164,8 @@ function Get-MochiFitterStatus {
                     $result.SmoothingProcessorPartial = $true
                 }
             } else {
-                # マーカーはあるがパッチ情報がない場合（古い形式）
-                $result.SmoothingProcessorOptimized = $true
+                # マーカーはあるがパッチ情報がない場合（古い形式）→ 部分適用として警告
+                $result.SmoothingProcessorPartial = $true
             }
         }
     }
@@ -181,8 +181,14 @@ function Get-MochiFitterStatus {
             # retarget_script2_*.py パターンでファイルを検索
             $retargetFiles = Get-ChildItem -Path $devPath -Filter "retarget_script2_*.py" -ErrorAction SilentlyContinue
             if ($retargetFiles) {
-                # 最新（最大番号）のファイルを取得
-                $latestFile = $retargetFiles | Sort-Object Name -Descending | Select-Object -First 1
+                # 最新（最大番号）のファイルを取得（数値ソート）
+                # 例: retarget_script2_9.py (9) < retarget_script2_14.py (14)
+                $latestFile = $retargetFiles | Sort-Object {
+                    if ($_.Name -match "retarget_script(\d+)_(\d+)\.py") {
+                        # メジャー.マイナー形式で数値比較（例: 2_14 → 2.14 * 1000 = 2014）
+                        [int]$Matches[1] * 1000 + [int]$Matches[2]
+                    } else { 0 }
+                } -Descending | Select-Object -First 1
                 $result.RetargetScriptPath = $latestFile.FullName
 
                 # バージョン番号を抽出（例: retarget_script2_14.py → "2_14"）
