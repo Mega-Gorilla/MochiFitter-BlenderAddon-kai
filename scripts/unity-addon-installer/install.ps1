@@ -602,10 +602,18 @@ if ($Uninstall) {
 
 Write-Host ""
 if ($success) {
-    Write-SuccessMessage "処理が完了しました"
+    if ($Uninstall) {
+        Write-SuccessMessage "アンインストールが完了しました"
+    } else {
+        Write-SuccessMessage "インストールが完了しました"
+    }
     exit 0
 } else {
-    Write-ErrorMessage "処理に失敗しました"
+    if ($Uninstall) {
+        Write-ErrorMessage "アンインストールに失敗しました"
+    } else {
+        Write-ErrorMessage "インストールに失敗しました"
+    }
     exit 1
 }
 
