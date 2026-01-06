@@ -7,62 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Performance (Issue #48)
-- **Unity アドオン**: retarget_script CPU最適化により **47%高速化** (340秒→180秒)
-  - PR #50: `foreach_get` + NumPy バッチ最適化
-  - PR #51: KDTree キャッシュ最適化
-  - PR #52: Numba JIT 距離計算（実験的）
-  - PR #53: 不要な numpy-to-Vector 変換の削除
-  - PR #54: `view_layer.update()` / `mesh.update()` 呼び出し最適化
-  - PR #55: Evaluated mesh API によるシェイプキー処理最適化
-  - PR #56: `temporarily_merge_for_weight_transfer` 最適化
+## [0.2.18] - 2026-01-07
 
 ### Added
-- **Unity アドオン**: Blender 自動セットアップスクリプト `scripts/setup_blender.py` (PR #44)
-  - Blender 4.0.2〜4.3.2 の自動ダウンロード・インストール
-  - クロスプラットフォーム対応（Windows/Linux/macOS）
-- **Unity アドオン**: CLI ラッパー `run_retarget.py` の移植性向上 (PR #41)
-  - ハードコードパスを削除
-  - 環境変数による設定サポート
-
-### Changed
-- **Unity アドオン**: RetargetContext クラスを導入（Phase 3.1 リファクタリング, PR #43）
-  - グローバル変数を dataclass ベースのコンテキストクラスに集約
-  - 後方互換性のためエイリアスを維持
-  - `clear_all_caches()` を `_context.clear_all_caches()` に委譲
-- **Unity アドオン**: `process_single_config()` を関数分離（Phase 3.2 リファクタリング, PR #45）
-  - `print_config_details()`: 設定ファイル内容のデバッグ出力
-  - `clean_mesh_invalid_vertices()`: 独立・非有限頂点の削除
-  - `apply_sub_bone_overrides()` / `restore_bone_overrides()`: サブボーン上書き管理
-  - `process_mesh_in_cycle1()`: Cycle1 メッシュ処理の抽出
-  - `preprocess_for_export()`: FBXエクスポート前処理の抽出
-  - `process_single_config()` が約820行→オーケストレーション関数に変換
-- **Unity アドオン**: コード品質改善 Phase 1 & 2 (Issue #36, PR #38, #39, #40)
-  - 重複関数の削除
-  - ハードコードオブジェクト名の修正
-  - 裸の `except:` を具体的な例外に修正
-  - BMesh メモリリークの修正（try/finally）
-  - マジックナンバーの定数化
-  - コメントアウトコードの削除
+- 出力ファイル名を小文字に統一 (Issue #64, PR #66)
+  - `normalize_avatar_name_for_filename()` ヘルパー関数を追加
+  - Unity拡張側との互換性のため、ファイル名のアバター名部分を小文字に変換
+  - Linuxでの大文字/小文字による別ファイル認識問題を解消
+  - 対象: `pose_basis_*.json`, `posediff_*_to_*.json`, `deformation_*.npz`, `temp_rbf_*.npz`
 
 ### Fixed
-- **Unity アドオン**: 最適化版で中心線上頂点の左右ウェイトが入れ替わる問題を修正 (Issue #60, PR #61, PR #62)
-  - `temporarily_merge_for_weight_transfer` で `query_ball_point` による完全なタイブレーク方式を採用 (PR #61)
-  - `fix_centerline_lr_weight_swaps()` による後処理修正を追加 (PR #62)
-    - 外部アドオン (robust_weight_transfer) のKDTreeタイブレーク問題を回避
-    - 頂点のX座標に基づいて不適切なL/Rウェイト割り当てを検出・修正
-  - 原因: cKDTree のタイブレーク動作が不定で、中心線上 (X≈0) の頂点が反対側のソース頂点とマッチする可能性があった
-- **Unity アドオン**: チェーン処理時のメモリ不足クラッシュを修正 (Issue #34, PR #35)
-  - `clear_all_caches()` 関数を追加（全グローバルキャッシュのクリア）
-  - ペア処理間でキャッシュクリアを実行
-  - `_deformation_field_cache` (NPZデータ、KDTree) の適切な解放
-  - `bpy.data.orphans_purge()` による Blender 孤立データの解放
-  - `gc.collect()` によるガベージコレクション強制実行
-- **Unity アドオン**: シェイプキー削除後のデータ整合性を確保 (Issue #46, PR #47)
-  - `obj.data.update()` を追加（シェイプキー削除後のメッシュデータ同期）
-  - `bpy.context.view_layer.update()` を追加（依存グラフ更新）
-  - `evaluated_get()` が正しいデータを返すことを保証
-  - 参照: [Blender #115572](https://projects.blender.org/blender/blender/issues/115572)
+- 後方互換性のため旧ファイル名へのフォールバックを追加 (PR #66)
+  - `find_field_data_file()` ヘルパー関数を追加
+  - 小文字ファイル名が見つからない場合、旧来の大文字混在ファイル名にフォールバック
+  - フォールバック時に「Note: Using legacy filename...」を表示
+
+### Removed
+- Unity アドオン最適化の開発を終了
+  - 本リポジトリでのUnity アドオン開発は中止
+  - Blender アドオンの開発に注力
 
 ## [0.2.17] - 2025-12-29
 
@@ -258,7 +221,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is forked from [MochiFitter](https://booth.pm/ja/items/7657840) version 2.5.0.
 
-[Unreleased]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.17...HEAD
+[Unreleased]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.18...HEAD
+[0.2.18]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.17...v0.2.18
 [0.2.17]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.15...v0.2.16
 [0.2.15]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.14...v0.2.15
