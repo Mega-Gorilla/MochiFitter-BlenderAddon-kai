@@ -10,17 +10,9 @@ MochiFitterは、VRChat/VRMアバター向けの衣装リターゲティング�
 
 ## インストール
 
-### パッケージ版（推奨）
-
-すぐに使えるパッケージ版は以下で配布しています：
+パッケージ版は以下で配布しています：
 
 **[MochiFitter-Kai（BOOTH）](https://megagorilla.booth.pm/items/7807826)**
-
-### ソースからのインストール
-
-1. このリポジトリをクローン
-2. `MochiFitter-BlenderAddon/` フォルダをBlenderのaddonsディレクトリにコピー（またはシンボリックリンク作成）
-3. Blenderで Edit → Preferences → Add-ons から「MochiFitter-Kai」を有効化
 
 ## このリポジトリの目的
 
