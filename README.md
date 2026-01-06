@@ -8,6 +8,20 @@ MochiFitter Blenderアドオンの最適化・リファクタリングプロジ�
 
 MochiFitterは、VRChat/VRMアバター向けの衣装リターゲティングシステムです。RBF（Radial Basis Function）補間と変形フィールドを使用して、異なるアバター間でメッシュ変形を転送します。
 
+## インストール
+
+### パッケージ版（推奨）
+
+すぐに使えるパッケージ版は以下で配布しています：
+
+**[MochiFitter-Kai（BOOTH）](https://megagorilla.booth.pm/items/7807826)**
+
+### ソースからのインストール
+
+1. このリポジトリをクローン
+2. `MochiFitter-BlenderAddon/` フォルダをBlenderのaddonsディレクトリにコピー（またはシンボリックリンク作成）
+3. Blenderで Edit → Preferences → Add-ons から「MochiFitter-Kai」を有効化
+
 ## このリポジトリの目的
 
 - コードの可読性向上
@@ -87,6 +101,7 @@ python run_retarget.py --preset beryl_to_mao
 
 ## 関連リンク
 
+- [MochiFitter-Kai（BOOTH）](https://megagorilla.booth.pm/items/7807826) - パッケージ版配布ページ
 - [MochiFitter（BOOTH）](https://booth.pm/ja/items/7657840) - オリジナル製品ページ
 
 ## 注意事項
