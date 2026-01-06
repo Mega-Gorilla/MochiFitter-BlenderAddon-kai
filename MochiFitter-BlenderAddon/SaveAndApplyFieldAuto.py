@@ -81,6 +81,47 @@ def normalize_avatar_name_for_filename(name: str) -> str:
     """
     return name.lower() if name else ""
 
+def find_field_data_file(scene_folder: str, source_avatar_name: str, target_avatar_name: str = None,
+                         source_shape_key_name: str = None, inverse_suffix: str = "") -> Optional[str]:
+    """
+    変形フィールドデータファイルのパスを探索する（後方互換性対応）
+
+    新しい小文字ファイル名を優先し、存在しない場合は元の大文字混在ファイル名にフォールバック。
+    これにより、旧バージョンで作成されたファイルも引き続き使用可能。
+
+    Parameters:
+        scene_folder (str): 検索対象のフォルダパス
+        source_avatar_name (str): ソースアバター名
+        target_avatar_name (str, optional): ターゲットアバター名（アバター間変形の場合）
+        source_shape_key_name (str, optional): シェイプキー名（シェイプキーモードの場合）
+        inverse_suffix (str): 逆変換サフィックス（"_inv" or ""）
+
+    Returns:
+        Optional[str]: 見つかったファイルパス、見つからない場合はNone
+
+    See: GitHub Issue #64, PR #66 review feedback
+    """
+    # 新しい小文字ファイル名（優先）
+    if source_shape_key_name:
+        new_filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_shape_{source_shape_key_name}{inverse_suffix}.npz"
+        old_filename = f"deformation_{source_avatar_name}_shape_{source_shape_key_name}{inverse_suffix}.npz"
+    else:
+        new_filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_to_{normalize_avatar_name_for_filename(target_avatar_name)}{inverse_suffix}.npz"
+        old_filename = f"deformation_{source_avatar_name}_to_{target_avatar_name}{inverse_suffix}.npz"
+
+    new_path = os.path.join(scene_folder, new_filename)
+    old_path = os.path.join(scene_folder, old_filename)
+
+    # 小文字ファイルを優先して探索
+    if os.path.exists(new_path):
+        return new_path
+    # 旧来の大文字混在ファイルにフォールバック
+    if os.path.exists(old_path):
+        print(f"Note: Using legacy filename '{old_filename}' (consider renaming to '{new_filename}')")
+        return old_path
+
+    return None
+
 def build_bone_hierarchy(bone_node: dict, bone_parents: Dict[str, str], current_path: list):
     """
     ボーン階層から親子関係のマッピングを再帰的に構築する
@@ -3057,26 +3098,33 @@ class APPLY_OT_FieldData(bpy.types.Operator):
             self.report({'ERROR'}, "Please specify source avatar name")
             return {'CANCELLED'}
         
-        # ファイルパスを現在の設定に基づいて生成
+        # ファイルパスを現在の設定に基づいて生成（後方互換性対応）
         scene_folder = get_scene_folder()
         if save_shape_key_mode:
             # シェイプキー変形モードの場合
             if not source_shape_key_name:
                 self.report({'ERROR'}, "Please specify shape key name in shape key mode")
                 return {'CANCELLED'}
-            field_data_path = os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_shape_{source_shape_key_name}.npz")
             display_name = "Shape key deformation data"
+            field_data_path = find_field_data_file(
+                scene_folder, source_avatar_name,
+                source_shape_key_name=source_shape_key_name
+            )
         else:
             # 通常のアバター間変形の場合
             if not target_avatar_name:
                 self.report({'ERROR'}, "Please specify target avatar name")
                 return {'CANCELLED'}
-            field_data_path = os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_to_{normalize_avatar_name_for_filename(target_avatar_name)}.npz")
             display_name = "Inter-avatar deformation data"
+            field_data_path = find_field_data_file(
+                scene_folder, source_avatar_name,
+                target_avatar_name=target_avatar_name
+            )
 
-        if not os.path.exists(field_data_path):
-            self.report({'ERROR'}, f"{display_name} file not found: {os.path.basename(field_data_path)}")
-            print(f"Deformation data file not found: {field_data_path}")
+        if not field_data_path:
+            expected_filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_{f'shape_{source_shape_key_name}' if save_shape_key_mode else f'to_{normalize_avatar_name_for_filename(target_avatar_name)}'}.npz"
+            self.report({'ERROR'}, f"{display_name} file not found: {expected_filename}")
+            print(f"Deformation data file not found in: {scene_folder}")
             return {'CANCELLED'}
         
         try:
@@ -3582,26 +3630,35 @@ class APPLY_OT_InverseFieldData(bpy.types.Operator):
             self.report({'ERROR'}, "Please specify source avatar name")
             return {'CANCELLED'}
         
-        # ファイルパスを現在の設定に基づいて生成（逆変形）
+        # ファイルパスを現在の設定に基づいて生成（逆変形、後方互換性対応）
         scene_folder = get_scene_folder()
         if save_shape_key_mode:
             # シェイプキー変形モードの場合
             if not source_shape_key_name:
                 self.report({'ERROR'}, "Please specify shape key name in shape key mode")
                 return {'CANCELLED'}
-            field_data_path = os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_shape_{source_shape_key_name}_inv.npz")
             display_name = "Inverse shape key deformation data"
+            field_data_path = find_field_data_file(
+                scene_folder, source_avatar_name,
+                source_shape_key_name=source_shape_key_name,
+                inverse_suffix="_inv"
+            )
         else:
             # 通常のアバター間変形の場合
             if not target_avatar_name:
                 self.report({'ERROR'}, "Please specify target avatar name")
                 return {'CANCELLED'}
-            field_data_path = os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_to_{normalize_avatar_name_for_filename(target_avatar_name)}_inv.npz")
             display_name = "Inverse inter-avatar deformation data"
+            field_data_path = find_field_data_file(
+                scene_folder, source_avatar_name,
+                target_avatar_name=target_avatar_name,
+                inverse_suffix="_inv"
+            )
 
-        if not os.path.exists(field_data_path):
-            self.report({'ERROR'}, f"{display_name} file not found: {os.path.basename(field_data_path)}")
-            print(f"Inverse deformation data file not found: {field_data_path}")
+        if not field_data_path:
+            expected_filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_{f'shape_{source_shape_key_name}' if save_shape_key_mode else f'to_{normalize_avatar_name_for_filename(target_avatar_name)}'}_inv.npz"
+            self.report({'ERROR'}, f"{display_name} file not found: {expected_filename}")
+            print(f"Inverse deformation data file not found in: {scene_folder}")
             return {'CANCELLED'}
         
         try:
@@ -5016,28 +5073,37 @@ class CREATE_OT_FieldVisualization(bpy.types.Operator):
         if not object_name:
             object_name = "FieldVisualization"
         
-        # ファイルパスを現在の設定に基づいて生成
+        # ファイルパスを現在の設定に基づいて生成（後方互換性対応）
         scene_folder = get_scene_folder()
         inverse_suffix = "_inv" if use_inverse else ""
-        
+
         if save_shape_key_mode:
             # シェイプキー変形モードの場合
             if not source_shape_key_name:
                 self.report({'ERROR'}, "Please specify shape key name in shape key mode")
                 return {'CANCELLED'}
-            field_data_path = os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_shape_{source_shape_key_name}{inverse_suffix}.npz")
             display_name = "Shape key deformation data"
+            field_data_path = find_field_data_file(
+                scene_folder, source_avatar_name,
+                source_shape_key_name=source_shape_key_name,
+                inverse_suffix=inverse_suffix
+            )
         else:
             # 通常のアバター間変形の場合
             if not target_avatar_name:
                 self.report({'ERROR'}, "Please specify target avatar name")
                 return {'CANCELLED'}
-            field_data_path = os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_to_{normalize_avatar_name_for_filename(target_avatar_name)}{inverse_suffix}.npz")
             display_name = "Inter-avatar deformation data"
+            field_data_path = find_field_data_file(
+                scene_folder, source_avatar_name,
+                target_avatar_name=target_avatar_name,
+                inverse_suffix=inverse_suffix
+            )
 
-        if not os.path.exists(field_data_path):
-            self.report({'ERROR'}, f"{display_name} file not found: {os.path.basename(field_data_path)}")
-            print(f"Deformation data file not found: {field_data_path}")
+        if not field_data_path:
+            expected_filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_{f'shape_{source_shape_key_name}' if save_shape_key_mode else f'to_{normalize_avatar_name_for_filename(target_avatar_name)}'}{inverse_suffix}.npz"
+            self.report({'ERROR'}, f"{display_name} file not found: {expected_filename}")
+            print(f"Deformation data file not found in: {scene_folder}")
             return {'CANCELLED'}
         
         try:
