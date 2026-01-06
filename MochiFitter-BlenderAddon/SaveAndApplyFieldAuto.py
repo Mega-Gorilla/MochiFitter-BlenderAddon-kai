@@ -64,6 +64,64 @@ def load_avatar_data(filename="avatar_data.json"):
     
     return avatar_data
 
+def normalize_avatar_name_for_filename(name: str) -> str:
+    """
+    アバター名をファイル名用に正規化（小文字変換）
+
+    Unity拡張側との互換性のため、出力ファイル名を小文字に統一する。
+    Linuxでは大文字小文字が区別されるため、統一しないと別ファイルとして扱われる。
+
+    Parameters:
+        name (str): アバター名
+
+    Returns:
+        str: 小文字に変換されたアバター名
+
+    See: GitHub Issue #64
+    """
+    return name.lower() if name else ""
+
+def find_field_data_file(scene_folder: str, source_avatar_name: str, target_avatar_name: str = None,
+                         source_shape_key_name: str = None, inverse_suffix: str = "") -> Optional[str]:
+    """
+    変形フィールドデータファイルのパスを探索する（後方互換性対応）
+
+    新しい小文字ファイル名を優先し、存在しない場合は元の大文字混在ファイル名にフォールバック。
+    これにより、旧バージョンで作成されたファイルも引き続き使用可能。
+
+    Parameters:
+        scene_folder (str): 検索対象のフォルダパス
+        source_avatar_name (str): ソースアバター名
+        target_avatar_name (str, optional): ターゲットアバター名（アバター間変形の場合）
+        source_shape_key_name (str, optional): シェイプキー名（シェイプキーモードの場合）
+        inverse_suffix (str): 逆変換サフィックス（"_inv" or ""）
+
+    Returns:
+        Optional[str]: 見つかったファイルパス、見つからない場合はNone
+
+    See: GitHub Issue #64, PR #66 review feedback
+    """
+    # 新しい小文字ファイル名（優先）
+    if source_shape_key_name:
+        new_filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_shape_{source_shape_key_name}{inverse_suffix}.npz"
+        old_filename = f"deformation_{source_avatar_name}_shape_{source_shape_key_name}{inverse_suffix}.npz"
+    else:
+        new_filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_to_{normalize_avatar_name_for_filename(target_avatar_name)}{inverse_suffix}.npz"
+        old_filename = f"deformation_{source_avatar_name}_to_{target_avatar_name}{inverse_suffix}.npz"
+
+    new_path = os.path.join(scene_folder, new_filename)
+    old_path = os.path.join(scene_folder, old_filename)
+
+    # 小文字ファイルを優先して探索
+    if os.path.exists(new_path):
+        return new_path
+    # 旧来の大文字混在ファイルにフォールバック
+    if os.path.exists(old_path):
+        print(f"Note: Using legacy filename '{old_filename}' (consider renaming to '{new_filename}')")
+        return old_path
+
+    return None
+
 def build_bone_hierarchy(bone_node: dict, bone_parents: Dict[str, str], current_path: list):
     """
     ボーン階層から親子関係のマッピングを再帰的に構築する
@@ -1508,10 +1566,10 @@ def create_shape_key_from_rbf(source_obj, source_shape_key_name, selected_only=T
             
             if save_shape_key_mode:
                 # シェイプキー変形モードの場合
-                field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_shape_{source_shape_key_name}{direction_suffix}.npz")
+                field_data_path = os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_shape_{source_shape_key_name}{direction_suffix}.npz")
             else:
                 # 通常のアバター間変形の場合
-                field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_to_{target_avatar_name}{direction_suffix}.npz")
+                field_data_path = os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_to_{normalize_avatar_name_for_filename(target_avatar_name)}{direction_suffix}.npz")
             
             # シェイプキーの値を保存
             original_values = {}
@@ -2550,7 +2608,7 @@ class RBF_PT_DeformationPanel(bpy.types.Panel):
             armature_available = True
             if scene.rbf_source_avatar_data_file:
                 base_pose_save_ready = True
-                base_pose_filename = f"pose_basis_{scene.rbf_source_avatar_name}.json"
+                base_pose_filename = f"pose_basis_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}.json"
                 row.operator("object.save_base_pose_diff", text=f"ベースポーズを保存", icon='EXPORT')
                 row = box.row()
                 row.label(text=f"保存先: {base_pose_filename}", icon='FILE')
@@ -2590,7 +2648,7 @@ class RBF_PT_DeformationPanel(bpy.types.Panel):
             pose_armature_available = True
             if scene.rbf_source_avatar_data_file:
                 pose_save_ready = True
-                pose_filename = f"posediff_{scene.rbf_source_avatar_name}_to_{scene.rbf_target_avatar_name}.json"
+                pose_filename = f"posediff_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}_to_{normalize_avatar_name_for_filename(scene.rbf_target_avatar_name)}.json"
                 row.operator("object.save_pose_diff", text=f"ポーズを保存", icon='EXPORT')
                 row = box.row()
                 row.label(text=f"保存先: {pose_filename}", icon='FILE')
@@ -2733,17 +2791,17 @@ class RBF_PT_DeformationPanel(bpy.types.Panel):
             row = box.row()
             if scene.rbf_save_shape_key_mode:
                 # シェイプキー変形モードの場合（通常と逆の両方を保存）
-                base_filename = f"deformation_{scene.rbf_source_avatar_name}_shape_{scene.rbf_source_shape_key}.npz"
+                base_filename = f"deformation_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}_shape_{scene.rbf_source_shape_key}.npz"
                 row.label(text=f"デフォルト名: {base_filename} + _inv.npz", icon='FILE')
                 row = box.row()
-                temp_filename = f"temp_rbf_{scene.rbf_source_avatar_name}_shape_{scene.rbf_source_shape_key}.npz"
+                temp_filename = f"temp_rbf_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}_shape_{scene.rbf_source_shape_key}.npz"
                 row.label(text=f"一時ファイル: {temp_filename} + _inv.npz", icon='TEMP')
             else:
                 # 通常のアバター間変形の場合（通常のみ）
-                field_filename = f"deformation_{scene.rbf_source_avatar_name}_to_{scene.rbf_target_avatar_name}.npz"
+                field_filename = f"deformation_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}_to_{normalize_avatar_name_for_filename(scene.rbf_target_avatar_name)}.npz"
                 row.label(text=f"デフォルト名: {field_filename}", icon='FILE')
                 row = box.row()
-                temp_filename = f"temp_rbf_{scene.rbf_source_avatar_name}_to_{scene.rbf_target_avatar_name}.npz"
+                temp_filename = f"temp_rbf_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}_to_{normalize_avatar_name_for_filename(scene.rbf_target_avatar_name)}.npz"
                 row.label(text=f"一時ファイル: {temp_filename}", icon='TEMP')
         
         # 区切り線
@@ -2797,9 +2855,9 @@ class RBF_PT_DeformationPanel(bpy.types.Panel):
             row = box.row()
             inverse_suffix = "_inv" if scene.rbf_field_use_inverse else ""
             if scene.rbf_save_shape_key_mode:
-                target_filename = f"deformation_{scene.rbf_source_avatar_name}_shape_{scene.rbf_source_shape_key}{inverse_suffix}.npz"
+                target_filename = f"deformation_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}_shape_{scene.rbf_source_shape_key}{inverse_suffix}.npz"
             else:
-                target_filename = f"deformation_{scene.rbf_source_avatar_name}_to_{scene.rbf_target_avatar_name}{inverse_suffix}.npz"
+                target_filename = f"deformation_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}_to_{normalize_avatar_name_for_filename(scene.rbf_target_avatar_name)}{inverse_suffix}.npz"
             row.label(text=f"対象: {target_filename}", icon='FILE')
             
             row = box.row()
@@ -2952,11 +3010,11 @@ class CREATE_OT_RBFDeformation(bpy.types.Operator, ExportHelper):
         
         if scene.rbf_save_shape_key_mode:
             # シェイプキー変形モードの場合
-            default_paths.append(os.path.join(scene_folder, f"deformation_{scene.rbf_source_avatar_name}_shape_{scene.rbf_source_shape_key}.npz"))
-            default_paths.append(os.path.join(scene_folder, f"deformation_{scene.rbf_source_avatar_name}_shape_{scene.rbf_source_shape_key}_inv.npz"))
+            default_paths.append(os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}_shape_{scene.rbf_source_shape_key}.npz"))
+            default_paths.append(os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}_shape_{scene.rbf_source_shape_key}_inv.npz"))
         else:
             # 通常のアバター間変形の場合
-            default_paths.append(os.path.join(scene_folder, f"deformation_{scene.rbf_source_avatar_name}_to_{scene.rbf_target_avatar_name}.npz"))
+            default_paths.append(os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}_to_{normalize_avatar_name_for_filename(scene.rbf_target_avatar_name)}.npz"))
         
         try:
             # RBF補間を実行してフィールドを生成し、Deformation Fieldデータを保存
@@ -3009,12 +3067,12 @@ class CREATE_OT_RBFDeformation(bpy.types.Operator, ExportHelper):
         if source_avatar_name:
             if save_shape_key_mode:
                 # シェイプキーモードの場合
-                filename = f"deformation_{source_avatar_name}_shape_{source_shape_key_name}"
+                filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_shape_{source_shape_key_name}"
             elif target_avatar_name:
                 # 通常の変形モードの場合
-                filename = f"deformation_{source_avatar_name}_to_{target_avatar_name}"
+                filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_to_{normalize_avatar_name_for_filename(target_avatar_name)}"
             self.filepath = filename + ".npz"
-        
+
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
@@ -3040,26 +3098,33 @@ class APPLY_OT_FieldData(bpy.types.Operator):
             self.report({'ERROR'}, "Please specify source avatar name")
             return {'CANCELLED'}
         
-        # ファイルパスを現在の設定に基づいて生成
+        # ファイルパスを現在の設定に基づいて生成（後方互換性対応）
         scene_folder = get_scene_folder()
         if save_shape_key_mode:
             # シェイプキー変形モードの場合
             if not source_shape_key_name:
                 self.report({'ERROR'}, "Please specify shape key name in shape key mode")
                 return {'CANCELLED'}
-            field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_shape_{source_shape_key_name}.npz")
             display_name = "Shape key deformation data"
+            field_data_path = find_field_data_file(
+                scene_folder, source_avatar_name,
+                source_shape_key_name=source_shape_key_name
+            )
         else:
             # 通常のアバター間変形の場合
             if not target_avatar_name:
                 self.report({'ERROR'}, "Please specify target avatar name")
                 return {'CANCELLED'}
-            field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_to_{target_avatar_name}.npz")
             display_name = "Inter-avatar deformation data"
+            field_data_path = find_field_data_file(
+                scene_folder, source_avatar_name,
+                target_avatar_name=target_avatar_name
+            )
 
-        if not os.path.exists(field_data_path):
-            self.report({'ERROR'}, f"{display_name} file not found: {os.path.basename(field_data_path)}")
-            print(f"Deformation data file not found: {field_data_path}")
+        if not field_data_path:
+            expected_filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_{f'shape_{source_shape_key_name}' if save_shape_key_mode else f'to_{normalize_avatar_name_for_filename(target_avatar_name)}'}.npz"
+            self.report({'ERROR'}, f"{display_name} file not found: {expected_filename}")
+            print(f"Deformation data file not found in: {scene_folder}")
             return {'CANCELLED'}
         
         try:
@@ -3159,7 +3224,7 @@ class SAVE_OT_BasePoseDiff(bpy.types.Operator, ExportHelper):
         scene = context.scene
         source_avatar_name = scene.rbf_source_avatar_name
         if source_avatar_name:
-            self.filepath = f"pose_basis_{source_avatar_name}.json"
+            self.filepath = f"pose_basis_{normalize_avatar_name_for_filename(source_avatar_name)}.json"
         else:
             self.filepath = "pose_basis.json"
         
@@ -3207,7 +3272,7 @@ class APPLY_OT_BasePoseDiff(bpy.types.Operator):
         armature_obj = active_obj
         
         # ファイル名を自動生成
-        pose_filename = f"pose_basis_{source_avatar_name}.json"
+        pose_filename = f"pose_basis_{normalize_avatar_name_for_filename(source_avatar_name)}.json"
         
         # アバターデータファイルのパスを絶対パスに変換
         if invert:
@@ -3309,7 +3374,7 @@ class SAVE_OT_PoseDiff(bpy.types.Operator, ExportHelper):
         source_avatar_name = scene.rbf_source_avatar_name
         target_avatar_name = scene.rbf_target_avatar_name
         if source_avatar_name and target_avatar_name:
-            self.filepath = f"posediff_{source_avatar_name}_to_{target_avatar_name}.json"
+            self.filepath = f"posediff_{normalize_avatar_name_for_filename(source_avatar_name)}_to_{normalize_avatar_name_for_filename(target_avatar_name)}.json"
         else:
             self.filepath = "posediff.json"
         
@@ -3358,7 +3423,7 @@ class APPLY_OT_PoseDiff(bpy.types.Operator):
         armature_obj = active_obj
         
         # ファイル名を自動生成
-        pose_filename = f"posediff_{source_avatar_name}_to_{target_avatar_name}.json"
+        pose_filename = f"posediff_{normalize_avatar_name_for_filename(source_avatar_name)}_to_{normalize_avatar_name_for_filename(target_avatar_name)}.json"
         
         # アバターデータファイルのパスを絶対パスに変換
         if invert:
@@ -3565,26 +3630,35 @@ class APPLY_OT_InverseFieldData(bpy.types.Operator):
             self.report({'ERROR'}, "Please specify source avatar name")
             return {'CANCELLED'}
         
-        # ファイルパスを現在の設定に基づいて生成（逆変形）
+        # ファイルパスを現在の設定に基づいて生成（逆変形、後方互換性対応）
         scene_folder = get_scene_folder()
         if save_shape_key_mode:
             # シェイプキー変形モードの場合
             if not source_shape_key_name:
                 self.report({'ERROR'}, "Please specify shape key name in shape key mode")
                 return {'CANCELLED'}
-            field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_shape_{source_shape_key_name}_inv.npz")
             display_name = "Inverse shape key deformation data"
+            field_data_path = find_field_data_file(
+                scene_folder, source_avatar_name,
+                source_shape_key_name=source_shape_key_name,
+                inverse_suffix="_inv"
+            )
         else:
             # 通常のアバター間変形の場合
             if not target_avatar_name:
                 self.report({'ERROR'}, "Please specify target avatar name")
                 return {'CANCELLED'}
-            field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_to_{target_avatar_name}_inv.npz")
             display_name = "Inverse inter-avatar deformation data"
+            field_data_path = find_field_data_file(
+                scene_folder, source_avatar_name,
+                target_avatar_name=target_avatar_name,
+                inverse_suffix="_inv"
+            )
 
-        if not os.path.exists(field_data_path):
-            self.report({'ERROR'}, f"{display_name} file not found: {os.path.basename(field_data_path)}")
-            print(f"Inverse deformation data file not found: {field_data_path}")
+        if not field_data_path:
+            expected_filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_{f'shape_{source_shape_key_name}' if save_shape_key_mode else f'to_{normalize_avatar_name_for_filename(target_avatar_name)}'}_inv.npz"
+            self.report({'ERROR'}, f"{display_name} file not found: {expected_filename}")
+            print(f"Inverse deformation data file not found in: {scene_folder}")
             return {'CANCELLED'}
         
         try:
@@ -3654,10 +3728,10 @@ def export_rbf_temp_data(source_obj, source_shape_key_name, selected_only=True, 
             
             if save_shape_key_mode:
                 # シェイプキー変形モードの場合
-                temp_data_path = os.path.join(scene_folder, f"temp_rbf_{source_avatar_name}_shape_{source_shape_key_name}{direction_suffix}.npz")
+                temp_data_path = os.path.join(scene_folder, f"temp_rbf_{normalize_avatar_name_for_filename(source_avatar_name)}_shape_{source_shape_key_name}{direction_suffix}.npz")
             else:
                 # 通常のアバター間変形の場合
-                temp_data_path = os.path.join(scene_folder, f"temp_rbf_{source_avatar_name}_to_{target_avatar_name}{direction_suffix}.npz")
+                temp_data_path = os.path.join(scene_folder, f"temp_rbf_{normalize_avatar_name_for_filename(source_avatar_name)}_to_{normalize_avatar_name_for_filename(target_avatar_name)}{direction_suffix}.npz")
             
             # シェイプキーの値を保存
             original_values = {}
@@ -4052,11 +4126,11 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
 
         if scene.rbf_save_shape_key_mode:
             # シェイプキー変形モードの場合
-            self._default_paths.append(os.path.join(scene_folder, f"deformation_{scene.rbf_source_avatar_name}_shape_{scene.rbf_source_shape_key}.npz"))
-            self._default_paths.append(os.path.join(scene_folder, f"deformation_{scene.rbf_source_avatar_name}_shape_{scene.rbf_source_shape_key}_inv.npz"))
+            self._default_paths.append(os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}_shape_{scene.rbf_source_shape_key}.npz"))
+            self._default_paths.append(os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}_shape_{scene.rbf_source_shape_key}_inv.npz"))
         else:
             # 通常のアバター間変形の場合
-            self._default_paths.append(os.path.join(scene_folder, f"deformation_{scene.rbf_source_avatar_name}_to_{scene.rbf_target_avatar_name}.npz"))
+            self._default_paths.append(os.path.join(scene_folder, f"deformation_{normalize_avatar_name_for_filename(scene.rbf_source_avatar_name)}_to_{normalize_avatar_name_for_filename(scene.rbf_target_avatar_name)}.npz"))
 
         try:
             # 一時データをエクスポート（同期処理 - 高速なため問題なし）
@@ -4345,10 +4419,10 @@ class EXPORT_OT_RBFTempData(bpy.types.Operator, ExportHelper):
         if source_avatar_name:
             if save_shape_key_mode:
                 # シェイプキーモードの場合
-                filename = f"deformation_{source_avatar_name}_shape_{source_shape_key_name}"
+                filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_shape_{source_shape_key_name}"
             elif target_avatar_name:
                 # 通常の変形モードの場合
-                filename = f"deformation_{source_avatar_name}_to_{target_avatar_name}"
+                filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_to_{normalize_avatar_name_for_filename(target_avatar_name)}"
             self.filepath = filename + ".npz"
 
         context.window_manager.fileselect_add(self)
@@ -4999,28 +5073,37 @@ class CREATE_OT_FieldVisualization(bpy.types.Operator):
         if not object_name:
             object_name = "FieldVisualization"
         
-        # ファイルパスを現在の設定に基づいて生成
+        # ファイルパスを現在の設定に基づいて生成（後方互換性対応）
         scene_folder = get_scene_folder()
         inverse_suffix = "_inv" if use_inverse else ""
-        
+
         if save_shape_key_mode:
             # シェイプキー変形モードの場合
             if not source_shape_key_name:
                 self.report({'ERROR'}, "Please specify shape key name in shape key mode")
                 return {'CANCELLED'}
-            field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_shape_{source_shape_key_name}{inverse_suffix}.npz")
             display_name = "Shape key deformation data"
+            field_data_path = find_field_data_file(
+                scene_folder, source_avatar_name,
+                source_shape_key_name=source_shape_key_name,
+                inverse_suffix=inverse_suffix
+            )
         else:
             # 通常のアバター間変形の場合
             if not target_avatar_name:
                 self.report({'ERROR'}, "Please specify target avatar name")
                 return {'CANCELLED'}
-            field_data_path = os.path.join(scene_folder, f"deformation_{source_avatar_name}_to_{target_avatar_name}{inverse_suffix}.npz")
             display_name = "Inter-avatar deformation data"
+            field_data_path = find_field_data_file(
+                scene_folder, source_avatar_name,
+                target_avatar_name=target_avatar_name,
+                inverse_suffix=inverse_suffix
+            )
 
-        if not os.path.exists(field_data_path):
-            self.report({'ERROR'}, f"{display_name} file not found: {os.path.basename(field_data_path)}")
-            print(f"Deformation data file not found: {field_data_path}")
+        if not field_data_path:
+            expected_filename = f"deformation_{normalize_avatar_name_for_filename(source_avatar_name)}_{f'shape_{source_shape_key_name}' if save_shape_key_mode else f'to_{normalize_avatar_name_for_filename(target_avatar_name)}'}{inverse_suffix}.npz"
+            self.report({'ERROR'}, f"{display_name} file not found: {expected_filename}")
+            print(f"Deformation data file not found in: {scene_folder}")
             return {'CANCELLED'}
         
         try:
