@@ -2396,7 +2396,7 @@ def register_properties():
     bpy.types.Scene.rbf_source_avatar_data_file = bpy.props.StringProperty(
         name="Source Avatar Data",
         description="変換元のアバターデータファイル",
-        default="avatar_data_source.json",
+        default="avatar_data_template.json",
         subtype='FILE_PATH'
     )
     
