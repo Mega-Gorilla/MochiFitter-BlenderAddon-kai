@@ -2547,11 +2547,11 @@ def get_armature_from_source_object(source_obj):
 
 # ツールパネルの設定
 class RBF_PT_DeformationPanel(bpy.types.Panel):
-    bl_label = "MochiFitter"
+    bl_label = "MochiFitter-Kai"
     bl_idname = "RBF_PT_DeformationPanel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'MochiFitter'  # ここで「MochiFitter」タブに表示するよう設定
+    bl_category = 'MochiFitter-Kai'  # ここで「MochiFitter-Kai」タブに表示するよう設定
     
     def draw(self, context):
         layout = self.layout
