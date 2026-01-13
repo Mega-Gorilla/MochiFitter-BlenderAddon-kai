@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-MochiFitter - Advanced Avatar Outfit Retargeting System for Blender
+MochiFitter-Kai - Advanced Avatar Outfit Retargeting System for Blender
 """
 
 bl_info = {
@@ -8,7 +8,7 @@ bl_info = {
     "author": "Community Fork (Original: MochiFitter Development Team)",
     "version": (0, 2, 19),
     "blender": (4, 0, 0),
-    "location": "View3D > Sidebar > MochiFitter",
+    "location": "View3D > Sidebar > MochiFitter-Kai",
     "description": "Community-optimized fork of MochiFitter - Avatar Outfit Retargeting System using RBF interpolation",
     "warning": "非公式版 - This is an unofficial community fork",
     "wiki_url": "https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai",
@@ -52,9 +52,9 @@ def register():
     
     try:
         SaveAndApplyFieldAuto.register()
-        print("MochiFitter アドオンが正常に登録されました")
+        print("MochiFitter-Kai アドオンが正常に登録されました")
     except Exception as e:
-        print(f"MochiFitter アドオンの登録中にエラーが発生しました: {e}")
+        print(f"MochiFitter-Kai アドオンの登録中にエラーが発生しました: {e}")
         import traceback
         traceback.print_exc()
 
@@ -64,9 +64,9 @@ def unregister():
     
     try:
         SaveAndApplyFieldAuto.unregister()
-        print("MochiFitter アドオンの登録が解除されました")
+        print("MochiFitter-Kai アドオンの登録が解除されました")
     except Exception as e:
-        print(f"MochiFitter アドオンの登録解除中にエラーが発生しました: {e}")
+        print(f"MochiFitter-Kai アドオンの登録解除中にエラーが発生しました: {e}")
         import traceback
         traceback.print_exc()
 

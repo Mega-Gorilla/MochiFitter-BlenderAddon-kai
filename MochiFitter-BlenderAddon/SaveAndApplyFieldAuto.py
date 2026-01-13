@@ -24,7 +24,7 @@ try:
 except ImportError:
     SCIPY_AVAILABLE = False
     print("Warning: scipy not found. Some features will be limited.")
-    print("Please use the NumPy/SciPy reinstall button to install.")
+    print("Please use the dependencies reinstall button to install.")
 
 print(f"SciPy available: {SCIPY_AVAILABLE}")
 
@@ -1228,7 +1228,7 @@ def rbf_interpolation(source_control_points, source_control_points_deformed, tar
     
     # SciPyの利用可能性をチェック
     if not SCIPY_AVAILABLE:
-        raise ImportError("SciPyが利用できません。NumPy・SciPy再インストールボタンを使用してインストールしてください。")
+        raise ImportError("SciPyが利用できません。依存パッケージ再インストールボタンを使用してインストールしてください。")
     
     # スケーリング係数を計算：距離の標準偏差に基づく値を使用
     if epsilon <= 0:
@@ -2114,7 +2114,7 @@ def apply_field_data(target_obj, field_data_path, shape_key_name="RBFDeform"):
         
         # SciPyの利用可能性をチェック
         if not SCIPY_AVAILABLE:
-            raise ImportError("SciPyが利用できません。NumPy・SciPy再インストールボタンを使用してインストールしてください。")
+            raise ImportError("SciPyが利用できません。依存パッケージ再インストールボタンを使用してインストールしてください。")
         
         # KDTreeを使用して近傍点を検索（各ステップで新しいKDTreeを構築）
         kdtree = cKDTree(field_points)
@@ -2547,11 +2547,11 @@ def get_armature_from_source_object(source_obj):
 
 # ツールパネルの設定
 class RBF_PT_DeformationPanel(bpy.types.Panel):
-    bl_label = "MochiFitter"
+    bl_label = "MochiFitter-Kai"
     bl_idname = "RBF_PT_DeformationPanel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'MochiFitter'  # ここで「MochiFitter」タブに表示するよう設定
+    bl_category = 'MochiFitter-Kai'  # ここで「MochiFitter-Kai」タブに表示するよう設定
     
     def draw(self, context):
         layout = self.layout
@@ -2756,7 +2756,7 @@ class RBF_PT_DeformationPanel(bpy.types.Panel):
         # 警告メッセージがあれば表示
         warning_msg = ""
         if not SCIPY_AVAILABLE:
-            warning_msg = "SciPyが利用できません。NumPy・SciPy再インストールボタンを使用してください"
+            warning_msg = "SciPyが利用できません。依存パッケージ再インストールボタンを使用してください"
         elif not scene.rbf_source_avatar_name or not scene.rbf_target_avatar_name:
             warning_msg = "アバター名を設定してください"
         elif not scene.rbf_source_obj:
@@ -2869,7 +2869,7 @@ class RBF_PT_DeformationPanel(bpy.types.Panel):
         
         # NumPy・SciPy再インストールセクション（常に表示）
         box = layout.box()
-        box.label(text="NumPy・SciPy マルチスレッド対応", icon='LIBRARY_DATA_DIRECT')
+        box.label(text="依存パッケージ管理", icon='LIBRARY_DATA_DIRECT')
         
         # 現在のnumpyとscipyのバージョンを表示
         col = box.column(align=True)
@@ -2886,10 +2886,17 @@ class RBF_PT_DeformationPanel(bpy.types.Panel):
             col.label(text=f"現在のSciPy: {scipy_version}", icon='CHECKMARK')
         except ImportError:
             col.label(text="SciPy が見つかりません（新規インストールされます）", icon='INFO')
-        
+
+        try:
+            import numba
+            numba_version = numba.__version__
+            col.label(text=f"現在のNumba: {numba_version}", icon='CHECKMARK')
+        except ImportError:
+            col.label(text="Numba が見つかりません（新規インストールされます）", icon='INFO')
+
         row = col.row()
         row.scale_y = 1.2
-        row.operator("rbf.reinstall_numpy_scipy_multithreaded", text="NumPy・SciPy・psutil 再インストール", icon='FILE_REFRESH')
+        row.operator("rbf.reinstall_numpy_scipy_multithreaded", text="依存パッケージ 再インストール", icon='FILE_REFRESH')
         
         # 区切り線
         layout.separator()
@@ -2914,7 +2921,7 @@ class RBF_PT_DeformationPanel(bpy.types.Panel):
             col.label(text="• importエラーが出る場合は上記テストを実行")
             col.label(text="• パス情報をコンソールで確認")
             col.label(text="• rbf_multithread_processor.pyを同じフォルダに配置")
-            col.label(text="• NumPy・SciPy再インストールでマルチスレッド対応版を利用")
+            col.label(text="• 依存パッケージ再インストールでマルチスレッド対応版を利用")
 
 
 # シェイプキー選択用のオペレーター
@@ -5251,6 +5258,7 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
             packages.append("scipy")
         # psutilも一緒にインストール（メモリ監視用）
         packages.append("psutil")
+        # Numbaは別ステップで試行（オプショナル、失敗しても動作継続）
 
         addon_dir = os.path.dirname(__file__)
         deps_path = os.path.join(addon_dir, 'deps')
@@ -5258,7 +5266,7 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         deps_old_path = os.path.join(addon_dir, 'deps_old')
 
         print(f"\n{'='*60}")
-        print(f"NumPy/SciPy/psutil Reinstallation Starting")
+        print(f"Dependencies Reinstallation Starting")
         print(f"{'='*60}")
         print(f"NumPy version: {numpy_version}")
         if scipy_version:
@@ -5266,6 +5274,7 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         else:
             print("SciPy: Not installed (will install new)")
         print("psutil: Latest version (for memory monitoring)")
+        print("Numba: Latest version (for JIT optimization)")
 
         # 一時ディレクトリをクリーンアップ（前回の失敗時のゴミを削除）
         # 注意: Windows ではファイルシステムの状態が遅延することがあるため
@@ -5467,6 +5476,76 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         print("Cleaning up wheel files...")
         safe_rmtree(wheels_path)
 
+        # Step 4: Numba を別途インストール（オプショナル）
+        # Numba のインストールが失敗しても、メインパッケージは正常にインストールされる
+        numba_success = False
+        print("\n" + "="*60)
+        print("Optional: Attempting Numba installation (JIT optimization)")
+        print("="*60)
+        try:
+            # Numba用の wheels ディレクトリを再作成
+            success, method = create_directory(wheels_path)
+            if success:
+                numba_cmd = [python_path, "-m", "pip", "download",
+                           "--no-cache-dir",
+                           "--only-binary=:all:",
+                           "--dest", wheels_path, "numba"]
+                print(f"Executing: {' '.join(numba_cmd)}")
+
+                numba_process = subprocess.Popen(
+                    numba_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env
+                )
+                numba_stdout, numba_stderr = numba_process.communicate()
+
+                if numba_process.returncode == 0:
+                    # Numba wheel を展開（numpy/scipy は既にインストール済みなのでスキップ）
+                    all_wheels = [f for f in os.listdir(wheels_path) if f.endswith('.whl')]
+                    # numpy-*.whl, scipy-*.whl をフィルタリング（ピン留めバージョンを保持）
+                    numba_wheels = [f for f in all_wheels
+                                   if not f.startswith('numpy-') and not f.startswith('scipy-')]
+                    skipped = [f for f in all_wheels if f not in numba_wheels]
+                    if skipped:
+                        print(f"  Skipping (already installed): {', '.join(skipped)}")
+                    for wheel_file in numba_wheels:
+                        wheel_path_full = os.path.join(wheels_path, wheel_file)
+                        print(f"  Extracting: {wheel_file}")
+                        try:
+                            with zipfile.ZipFile(wheel_path_full, 'r') as zip_ref:
+                                for member in zip_ref.namelist():
+                                    target_path = os.path.join(deps_new_path, member)
+                                    if member.endswith('/'):
+                                        if target_path not in created_dirs:
+                                            create_directory(target_path)
+                                            created_dirs.add(target_path)
+                                        continue
+                                    parent_dir = os.path.dirname(target_path)
+                                    if parent_dir and parent_dir not in created_dirs:
+                                        create_directory(parent_dir)
+                                        created_dirs.add(parent_dir)
+                                    with zip_ref.open(member) as source:
+                                        with open(target_path, 'wb') as target:
+                                            target.write(source.read())
+                        except Exception as e:
+                            print(f"  Warning: Failed to extract {wheel_file}: {e}")
+                    numba_success = True
+                    print("Numba installation successful")
+                else:
+                    numba_error = safe_decode(numba_stderr)
+                    print(f"Numba download failed (optional, continuing without it): {numba_error}")
+
+                # Numba wheels ディレクトリを削除
+                safe_rmtree(wheels_path)
+        except Exception as e:
+            print(f"Numba installation skipped due to error (optional): {e}")
+            safe_rmtree(wheels_path)
+
+        if not numba_success:
+            print("Note: Numba not installed. RBF processing will use SciPy fallback.")
+        print("="*60 + "\n")
+
         # pip 成功: ディレクトリを置き換え
         print("Installation successful. Replacing directory...")
 
@@ -5500,7 +5579,7 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         return True, result.stdout, result.stderr
 
     except Exception as e:
-        error_msg = f"Error occurred during NumPy/SciPy reinstallation: {str(e)}"
+        error_msg = f"Error occurred during dependencies reinstallation: {str(e)}"
         print(error_msg)
         import traceback
         traceback.print_exc()
@@ -5510,8 +5589,8 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
 # numpy・scipy再インストールオペレーター（Modal版 - UIフリーズ回避）
 class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
     bl_idname = "rbf.reinstall_numpy_scipy_multithreaded"
-    bl_label = "Reinstall NumPy & SciPy & psutil"
-    bl_description = "numpy, scipy, psutilを再インストール（マルチスレッド対応版）"
+    bl_label = "Reinstall Dependencies"
+    bl_description = "NumPy, SciPy, psutil, Numbaを再インストール"
 
     # インストールスレッドの状態を保持
     _timer = None
@@ -5526,7 +5605,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
             # ステータスバーのアニメーション更新
             self._dot_count = (self._dot_count + 1) % 4
             dots = "." * (self._dot_count + 1)
-            context.workspace.status_text_set(f"Installing NumPy/SciPy{dots}")
+            context.workspace.status_text_set(f"Installing dependencies{dots}")
 
             # スレッドの完了をチェック
             if self._thread is not None and not self._thread.is_alive():
@@ -5548,11 +5627,11 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
                         packages_info += ", SciPy (new installation)"
 
                     self.report({'WARNING'}, f"{packages_info} reinstalled. Please restart Blender")
-                    print(f"NumPy/SciPy reinstall succeeded. Please restart Blender.")
+                    print(f"Dependencies reinstall succeeded. Please restart Blender.")
 
                     # 成功ポップアップを表示
                     def draw_success_popup(self, context):
-                        self.layout.label(text="NumPy/SciPy installation complete")
+                        self.layout.label(text="Dependencies installation complete")
                         self.layout.label(text="")
                         self.layout.label(text="Please restart Blender", icon='ERROR')
 
@@ -5561,7 +5640,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
                     if error:
                         self.report({'ERROR'}, error)
                     else:
-                        self.report({'ERROR'}, "NumPy/SciPy reinstallation failed")
+                        self.report({'ERROR'}, "Dependencies reinstallation failed")
 
                     # エラーポップアップを表示
                     def draw_error_popup(self, context):
@@ -5621,7 +5700,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
 
         # ステータスバーに表示開始
         self._dot_count = 0
-        context.workspace.status_text_set("Installing NumPy/SciPy.")
+        context.workspace.status_text_set("Installing dependencies.")
 
         self.report({'INFO'}, "Installing... (running in background)")
 

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.19] - 2026-01-13
+
+### Added
+- 依存パッケージ再インストールボタンに Numba を追加 (Issue #68, PR #69)
+  - Numba JIT 最適化が再インストールボタンから自動インストール可能に
+  - UI に Numba バージョン/ステータス表示を追加
+  - セクションタイトルを「依存パッケージ管理」に変更
+  - ボタンテキストを「依存パッケージ 再インストール」に変更
+
+### Fixed
+- Numba インストール時の安全性強化 (PR #69)
+  - Numba を別ステップで試行し、失敗時も NumPy/SciPy/psutil は正常にインストール
+  - Numba wheel 展開時に numpy/scipy をスキップし、ピン留めバージョンを保持
+
 ## [0.2.18] - 2026-01-07
 
 ### Added
@@ -221,7 +235,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is forked from [MochiFitter](https://booth.pm/ja/items/7657840) version 2.5.0.
 
-[Unreleased]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.18...HEAD
+[Unreleased]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.19...HEAD
+[0.2.19]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.18...v0.2.19
 [0.2.18]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.17...v0.2.18
 [0.2.17]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.15...v0.2.16
