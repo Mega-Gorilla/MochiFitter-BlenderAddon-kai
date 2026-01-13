@@ -43,7 +43,7 @@ INCLUDE_FILES = [
 # Bundled dependencies to include (from deps/)
 BUNDLED_DEPS = [
     "psutil",
-    "psutil-7.2.0.dist-info",
+    "psutil-7.2.1.dist-info",
 ]
 
 # Patterns to exclude
