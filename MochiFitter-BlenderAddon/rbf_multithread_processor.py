@@ -153,7 +153,9 @@ DEFAULT_DTYPE = np.float32
 # Numba JIT高速化関数（P2-1）
 # =============================================================================
 
-@jit(nopython=True, parallel=True, fastmath=True, cache=True, nogil=True)
+# cache=False: Microsoft Store版Blenderのサンドボックス環境で
+# キャッシュディレクトリへのアクセスがハングする問題を回避
+@jit(nopython=True, parallel=True, fastmath=True, cache=False, nogil=True)
 def _cdist_sqeuclidean_numba(A: np.ndarray, B: np.ndarray) -> np.ndarray:
     """
     Numba JIT版 二乗ユークリッド距離計算
@@ -184,7 +186,9 @@ def _cdist_sqeuclidean_numba(A: np.ndarray, B: np.ndarray) -> np.ndarray:
     return result
 
 
-@jit(nopython=True, parallel=True, fastmath=True, cache=True, nogil=True)
+# cache=False: Microsoft Store版Blenderのサンドボックス環境で
+# キャッシュディレクトリへのアクセスがハングする問題を回避
+@jit(nopython=True, parallel=True, fastmath=True, cache=False, nogil=True)
 def _cdist_euclidean_numba(A: np.ndarray, B: np.ndarray) -> np.ndarray:
     """
     Numba JIT版 ユークリッド距離計算
