@@ -118,6 +118,14 @@ tests/optimized_data/
 tests/*_results.json
 
 # -------------------------------------------
+# Benchmark Data (RBF Performance Testing)
+# -------------------------------------------
+# benchmark_data 内のファイルを除外（README.md と .gitkeep は追跡）
+tests/benchmark_data/*
+!tests/benchmark_data/README.md
+!tests/benchmark_data/.gitkeep
+
+# -------------------------------------------
 # その他
 # -------------------------------------------
 *.log
