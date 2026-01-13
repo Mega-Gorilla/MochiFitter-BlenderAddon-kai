@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.20] - 2026-01-13
+
+### Fixed
+- Microsoft Store 版 Blender で NPZ 生成がハングする問題を修正 (Issue #70, PR #71)
+  - Numba JIT の `cache=True` が AppContainer サンドボックス環境でキャッシュディレクトリへのアクセス時にハング
+  - `cache=False` に変更し、毎回 JIT コンパイルを実行（数秒の遅延）
+  - 対象関数: `_cdist_sqeuclidean_numba()`, `_cdist_euclidean_numba()`
+
 ## [0.2.19] - 2026-01-13
 
 ### Added
@@ -240,7 +248,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is forked from [MochiFitter](https://booth.pm/ja/items/7657840) version 2.5.0.
 
-[Unreleased]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.19...HEAD
+[Unreleased]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.20...HEAD
+[0.2.20]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.19...v0.2.20
 [0.2.19]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.18...v0.2.19
 [0.2.18]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.17...v0.2.18
 [0.2.17]: https://github.com/Mega-Gorilla/MochiFitter-BlenderAddon-kai/compare/v0.2.16...v0.2.17
