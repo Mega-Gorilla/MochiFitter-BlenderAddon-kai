@@ -87,6 +87,9 @@ MochiFitter-BlenderAddon/deps_old/
 # AI / Claude Code
 # -------------------------------------------
 .claude/settings.local.json
+# Claude Code Bash cwd tracking files (known bug: not auto-cleaned)
+# https://github.com/anthropics/claude-code/issues/17636
+tmpclaude-*-cwd
 
 # -------------------------------------------
 # OS
