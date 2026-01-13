@@ -20,10 +20,9 @@ temp_rbf_template_to_ririka.npz  (~43MB)
 temp_rbf_template_to_mao.npz    (~65MB)
 ```
 
-**配置元の例**:
-```
-C:\Users\<user>\Downloads\MochiFitter30r\temp_rbf_*.npz
-```
+**配置元**:
+- MochiFitter作業フォルダー内の `temp_rbf_*.npz` ファイル
+- 変形フィールド生成時に自動的に作成される
 
 ### 2. MochiFitter-BlenderAddon1.0.4.zip（純正版、比較用）
 
