@@ -24,7 +24,7 @@ try:
 except ImportError:
     SCIPY_AVAILABLE = False
     print("Warning: scipy not found. Some features will be limited.")
-    print("Please use the NumPy/SciPy reinstall button to install.")
+    print("Please use the dependencies reinstall button to install.")
 
 print(f"SciPy available: {SCIPY_AVAILABLE}")
 
@@ -1228,7 +1228,7 @@ def rbf_interpolation(source_control_points, source_control_points_deformed, tar
     
     # SciPyの利用可能性をチェック
     if not SCIPY_AVAILABLE:
-        raise ImportError("SciPyが利用できません。NumPy・SciPy再インストールボタンを使用してインストールしてください。")
+        raise ImportError("SciPyが利用できません。依存パッケージ再インストールボタンを使用してインストールしてください。")
     
     # スケーリング係数を計算：距離の標準偏差に基づく値を使用
     if epsilon <= 0:
@@ -2114,7 +2114,7 @@ def apply_field_data(target_obj, field_data_path, shape_key_name="RBFDeform"):
         
         # SciPyの利用可能性をチェック
         if not SCIPY_AVAILABLE:
-            raise ImportError("SciPyが利用できません。NumPy・SciPy再インストールボタンを使用してインストールしてください。")
+            raise ImportError("SciPyが利用できません。依存パッケージ再インストールボタンを使用してインストールしてください。")
         
         # KDTreeを使用して近傍点を検索（各ステップで新しいKDTreeを構築）
         kdtree = cKDTree(field_points)
@@ -2756,7 +2756,7 @@ class RBF_PT_DeformationPanel(bpy.types.Panel):
         # 警告メッセージがあれば表示
         warning_msg = ""
         if not SCIPY_AVAILABLE:
-            warning_msg = "SciPyが利用できません。NumPy・SciPy再インストールボタンを使用してください"
+            warning_msg = "SciPyが利用できません。依存パッケージ再インストールボタンを使用してください"
         elif not scene.rbf_source_avatar_name or not scene.rbf_target_avatar_name:
             warning_msg = "アバター名を設定してください"
         elif not scene.rbf_source_obj:
@@ -2869,7 +2869,7 @@ class RBF_PT_DeformationPanel(bpy.types.Panel):
         
         # NumPy・SciPy再インストールセクション（常に表示）
         box = layout.box()
-        box.label(text="NumPy・SciPy マルチスレッド対応", icon='LIBRARY_DATA_DIRECT')
+        box.label(text="依存パッケージ管理", icon='LIBRARY_DATA_DIRECT')
         
         # 現在のnumpyとscipyのバージョンを表示
         col = box.column(align=True)
@@ -2886,10 +2886,17 @@ class RBF_PT_DeformationPanel(bpy.types.Panel):
             col.label(text=f"現在のSciPy: {scipy_version}", icon='CHECKMARK')
         except ImportError:
             col.label(text="SciPy が見つかりません（新規インストールされます）", icon='INFO')
-        
+
+        try:
+            import numba
+            numba_version = numba.__version__
+            col.label(text=f"現在のNumba: {numba_version}", icon='CHECKMARK')
+        except ImportError:
+            col.label(text="Numba が見つかりません（新規インストールされます）", icon='INFO')
+
         row = col.row()
         row.scale_y = 1.2
-        row.operator("rbf.reinstall_numpy_scipy_multithreaded", text="NumPy・SciPy・psutil 再インストール", icon='FILE_REFRESH')
+        row.operator("rbf.reinstall_numpy_scipy_multithreaded", text="依存パッケージ 再インストール", icon='FILE_REFRESH')
         
         # 区切り線
         layout.separator()
@@ -2914,7 +2921,7 @@ class RBF_PT_DeformationPanel(bpy.types.Panel):
             col.label(text="• importエラーが出る場合は上記テストを実行")
             col.label(text="• パス情報をコンソールで確認")
             col.label(text="• rbf_multithread_processor.pyを同じフォルダに配置")
-            col.label(text="• NumPy・SciPy再インストールでマルチスレッド対応版を利用")
+            col.label(text="• 依存パッケージ再インストールでマルチスレッド対応版を利用")
 
 
 # シェイプキー選択用のオペレーター
@@ -5251,6 +5258,8 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
             packages.append("scipy")
         # psutilも一緒にインストール（メモリ監視用）
         packages.append("psutil")
+        # NumbaもインストールJIT最適化用、失敗しても動作継続）
+        packages.append("numba")
 
         addon_dir = os.path.dirname(__file__)
         deps_path = os.path.join(addon_dir, 'deps')
@@ -5258,7 +5267,7 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         deps_old_path = os.path.join(addon_dir, 'deps_old')
 
         print(f"\n{'='*60}")
-        print(f"NumPy/SciPy/psutil Reinstallation Starting")
+        print(f"Dependencies Reinstallation Starting")
         print(f"{'='*60}")
         print(f"NumPy version: {numpy_version}")
         if scipy_version:
@@ -5266,6 +5275,7 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         else:
             print("SciPy: Not installed (will install new)")
         print("psutil: Latest version (for memory monitoring)")
+        print("Numba: Latest version (for JIT optimization)")
 
         # 一時ディレクトリをクリーンアップ（前回の失敗時のゴミを削除）
         # 注意: Windows ではファイルシステムの状態が遅延することがあるため
@@ -5500,7 +5510,7 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         return True, result.stdout, result.stderr
 
     except Exception as e:
-        error_msg = f"Error occurred during NumPy/SciPy reinstallation: {str(e)}"
+        error_msg = f"Error occurred during dependencies reinstallation: {str(e)}"
         print(error_msg)
         import traceback
         traceback.print_exc()
@@ -5510,8 +5520,8 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
 # numpy・scipy再インストールオペレーター（Modal版 - UIフリーズ回避）
 class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
     bl_idname = "rbf.reinstall_numpy_scipy_multithreaded"
-    bl_label = "Reinstall NumPy & SciPy & psutil"
-    bl_description = "numpy, scipy, psutilを再インストール（マルチスレッド対応版）"
+    bl_label = "Reinstall Dependencies"
+    bl_description = "NumPy, SciPy, psutil, Numbaを再インストール"
 
     # インストールスレッドの状態を保持
     _timer = None
@@ -5526,7 +5536,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
             # ステータスバーのアニメーション更新
             self._dot_count = (self._dot_count + 1) % 4
             dots = "." * (self._dot_count + 1)
-            context.workspace.status_text_set(f"Installing NumPy/SciPy{dots}")
+            context.workspace.status_text_set(f"Installing dependencies{dots}")
 
             # スレッドの完了をチェック
             if self._thread is not None and not self._thread.is_alive():
@@ -5548,11 +5558,11 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
                         packages_info += ", SciPy (new installation)"
 
                     self.report({'WARNING'}, f"{packages_info} reinstalled. Please restart Blender")
-                    print(f"NumPy/SciPy reinstall succeeded. Please restart Blender.")
+                    print(f"Dependencies reinstall succeeded. Please restart Blender.")
 
                     # 成功ポップアップを表示
                     def draw_success_popup(self, context):
-                        self.layout.label(text="NumPy/SciPy installation complete")
+                        self.layout.label(text="Dependencies installation complete")
                         self.layout.label(text="")
                         self.layout.label(text="Please restart Blender", icon='ERROR')
 
@@ -5561,7 +5571,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
                     if error:
                         self.report({'ERROR'}, error)
                     else:
-                        self.report({'ERROR'}, "NumPy/SciPy reinstallation failed")
+                        self.report({'ERROR'}, "Dependencies reinstallation failed")
 
                     # エラーポップアップを表示
                     def draw_error_popup(self, context):
@@ -5621,7 +5631,7 @@ class REINSTALL_OT_NumpyScipyMultithreaded(bpy.types.Operator):
 
         # ステータスバーに表示開始
         self._dot_count = 0
-        context.workspace.status_text_set("Installing NumPy/SciPy.")
+        context.workspace.status_text_set("Installing dependencies.")
 
         self.report({'INFO'}, "Installing... (running in background)")
 
