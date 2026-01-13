@@ -5501,8 +5501,14 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
                 numba_stdout, numba_stderr = numba_process.communicate()
 
                 if numba_process.returncode == 0:
-                    # Numba wheel を展開
-                    numba_wheels = [f for f in os.listdir(wheels_path) if f.endswith('.whl')]
+                    # Numba wheel を展開（numpy/scipy は既にインストール済みなのでスキップ）
+                    all_wheels = [f for f in os.listdir(wheels_path) if f.endswith('.whl')]
+                    # numpy-*.whl, scipy-*.whl をフィルタリング（ピン留めバージョンを保持）
+                    numba_wheels = [f for f in all_wheels
+                                   if not f.startswith('numpy-') and not f.startswith('scipy-')]
+                    skipped = [f for f in all_wheels if f not in numba_wheels]
+                    if skipped:
+                        print(f"  Skipping (already installed): {', '.join(skipped)}")
                     for wheel_file in numba_wheels:
                         wheel_path_full = os.path.join(wheels_path, wheel_file)
                         print(f"  Extracting: {wheel_file}")
