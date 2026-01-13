@@ -58,7 +58,7 @@ NUMBA_DISABLE_JIT=1 python MochiFitter-BlenderAddon/rbf_multithread_processor.py
 python MochiFitter-BlenderAddon/rbf_multithread_processor.py tests/benchmark_data/temp_rbf_template_to_ririka.npz
 
 # 純正 v1.0.4 (ZIPを展開後)
-python tests/benchmark_data/MochiFitter-BlenderAddon/rbf_multithread_processor.py tests/benchmark_data/temp_rbf_template_to_ririka.npz
+python tests/benchmark_data/MochiFitter/rbf_multithread_processor.py tests/benchmark_data/temp_rbf_template_to_ririka.npz
 ```
 
 ## ファイル構造
@@ -70,7 +70,7 @@ benchmark_data/
 ├── temp_rbf_template_to_ririka.npz        # (ユーザー配置)
 ├── temp_rbf_template_to_mao.npz           # (ユーザー配置)
 ├── MochiFitter-BlenderAddon1.0.4.zip      # (ユーザー配置)
-└── MochiFitter-BlenderAddon/              # (ZIPを展開)
+└── MochiFitter/                           # (ZIPを展開)
     └── rbf_multithread_processor.py
 ```
 
