@@ -5258,8 +5258,7 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
             packages.append("scipy")
         # psutilも一緒にインストール（メモリ監視用）
         packages.append("psutil")
-        # NumbaもインストールJIT最適化用、失敗しても動作継続）
-        packages.append("numba")
+        # Numbaは別ステップで試行（オプショナル、失敗しても動作継続）
 
         addon_dir = os.path.dirname(__file__)
         deps_path = os.path.join(addon_dir, 'deps')
@@ -5476,6 +5475,70 @@ def reinstall_numpy_scipy_multithreaded(python_path, numpy_version, scipy_versio
         # Step 3: wheels ディレクトリを削除
         print("Cleaning up wheel files...")
         safe_rmtree(wheels_path)
+
+        # Step 4: Numba を別途インストール（オプショナル）
+        # Numba のインストールが失敗しても、メインパッケージは正常にインストールされる
+        numba_success = False
+        print("\n" + "="*60)
+        print("Optional: Attempting Numba installation (JIT optimization)")
+        print("="*60)
+        try:
+            # Numba用の wheels ディレクトリを再作成
+            success, method = create_directory(wheels_path)
+            if success:
+                numba_cmd = [python_path, "-m", "pip", "download",
+                           "--no-cache-dir",
+                           "--only-binary=:all:",
+                           "--dest", wheels_path, "numba"]
+                print(f"Executing: {' '.join(numba_cmd)}")
+
+                numba_process = subprocess.Popen(
+                    numba_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env
+                )
+                numba_stdout, numba_stderr = numba_process.communicate()
+
+                if numba_process.returncode == 0:
+                    # Numba wheel を展開
+                    numba_wheels = [f for f in os.listdir(wheels_path) if f.endswith('.whl')]
+                    for wheel_file in numba_wheels:
+                        wheel_path_full = os.path.join(wheels_path, wheel_file)
+                        print(f"  Extracting: {wheel_file}")
+                        try:
+                            with zipfile.ZipFile(wheel_path_full, 'r') as zip_ref:
+                                for member in zip_ref.namelist():
+                                    target_path = os.path.join(deps_new_path, member)
+                                    if member.endswith('/'):
+                                        if target_path not in created_dirs:
+                                            create_directory(target_path)
+                                            created_dirs.add(target_path)
+                                        continue
+                                    parent_dir = os.path.dirname(target_path)
+                                    if parent_dir and parent_dir not in created_dirs:
+                                        create_directory(parent_dir)
+                                        created_dirs.add(parent_dir)
+                                    with zip_ref.open(member) as source:
+                                        with open(target_path, 'wb') as target:
+                                            target.write(source.read())
+                        except Exception as e:
+                            print(f"  Warning: Failed to extract {wheel_file}: {e}")
+                    numba_success = True
+                    print("Numba installation successful")
+                else:
+                    numba_error = safe_decode(numba_stderr)
+                    print(f"Numba download failed (optional, continuing without it): {numba_error}")
+
+                # Numba wheels ディレクトリを削除
+                safe_rmtree(wheels_path)
+        except Exception as e:
+            print(f"Numba installation skipped due to error (optional): {e}")
+            safe_rmtree(wheels_path)
+
+        if not numba_success:
+            print("Note: Numba not installed. RBF processing will use SciPy fallback.")
+        print("="*60 + "\n")
 
         # pip 成功: ディレクトリを置き換え
         print("Installation successful. Replacing directory...")
