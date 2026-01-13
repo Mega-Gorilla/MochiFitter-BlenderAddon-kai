@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - セクションタイトルを「依存パッケージ管理」に変更
   - ボタンテキストを「依存パッケージ 再インストール」に変更
 
+### Changed
+- UI表示を「MochiFitter」から「MochiFitter-Kai」に統一 (PR #69)
+  - サイドバータブ名、パネルラベルを変更
+  - コンソールメッセージを更新
+
 ### Fixed
 - Numba インストール時の安全性強化 (PR #69)
   - Numba を別ステップで試行し、失敗時も NumPy/SciPy/psutil は正常にインストール
